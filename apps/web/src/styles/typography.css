@@ -1,0 +1,17 @@
+/* Glass & Slate — Typography
+   Inter for UI, JetBrains Mono for metadata/technical values */
+@layer base {
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: 'Inter', sans-serif;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  body, p, a, span, .font-body {
+    font-family: 'Inter', sans-serif;
+  }
+
+  code, pre, .font-mono, .font-metadata {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}

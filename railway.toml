@@ -1,0 +1,5 @@
+# Railway Configuration
+# This file helps Railway understand your project structure
+
+[config]
+# Build from root, but we'll deploy services separately
