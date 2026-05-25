@@ -18,44 +18,32 @@ import videoFavoritesRouter from './video-favorites.js';
 import promptHistoryRouter from './prompt-history.js';
 import videoRegenerateRouter from './video-regenerate.js';
 
-const router = Router();
-
 export default () => {
-	// Root endpoint
-	router.get('/', (req, res) => {
-		res.json({
-			message: 'AetherVideo API',
-			version: '1.0.0',
-			status: 'running',
-			endpoints: {
-				health: '/health',
-				auth: '/auth',
-				videos: '/videos',
-				credits: '/credits',
-				settings: '/settings',
-				admin: '/admin/*'
-			}
-		});
+	const router = Router();
+
+	router.get('/', (_req, res) => {
+		res.json({ name: 'AetherVideo API', status: 'ok' });
 	});
-	
+
 	router.get('/health', healthCheck);
-	router.use('/integrated-ai', integratedAiRouter);
+
 	router.use('/auth', authRouter);
+	router.use('/integrated-ai', integratedAiRouter);
 	router.use('/videos', videosRouter);
+	router.use('/videos', videoSharingRouter);
+	router.use('/videos', videoFavoritesRouter);
+	router.use('/videos', videoRegenerateRouter);
 	router.use('/credits', creditsRouter);
 	router.use('/users', usersRouter);
 	router.use('/stripe', stripeRouter);
 	router.use('/wallet', walletRouter);
 	router.use('/webhooks', webhooksRouter);
 	router.use('/settings', settingsRouter);
+	router.use('/prompts', promptHistoryRouter);
 	router.use('/admin/providers', adminProvidersRouter);
 	router.use('/admin/users', adminUsersRouter);
 	router.use('/admin/settings', adminSettingsRouter);
 	router.use('/admin/analytics', adminAnalyticsRouter);
-	router.use('/videos', videoSharingRouter);
-	router.use('/videos', videoFavoritesRouter);
-	router.use('/prompts', promptHistoryRouter);
-	router.use('/videos', videoRegenerateRouter);
 
 	return router;
 };
