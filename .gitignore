@@ -4,3 +4,13 @@ node_modules
 .env
 .env.*
 !.env.example
+
+# PocketBase local data and binaries (per-environment, large, sometimes sensitive)
+apps/pocketbase/pb_data/
+apps/pocketbase/pb_data_backup/
+apps/pocketbase/pb_snapshots/
+apps/pocketbase/pocketbase
+apps/pocketbase/pocketbase.exe
+apps/pocketbase/pocketbase_linux
+apps/pocketbase/pocketbase_win.zip
+apps/pocketbase/pb38.zip
