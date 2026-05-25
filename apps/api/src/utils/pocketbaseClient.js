@@ -3,16 +3,18 @@ dotenv.config();
 import Pocketbase from 'pocketbase';
 import logger from './logger.js';
 
-const POCKETBASE_HOST = `http://localhost:8090`;
+const POCKETBASE_HOST = process.env.POCKETBASE_URL || `http://localhost:8090`;
 
 async function waitForHealth({ retries = 10, delayMs = 1000 } = {}) {
     for (let i = 1; i <= retries; i++) {
-        const response = await fetch(`${POCKETBASE_HOST}/api/health`, { method: 'HEAD' });
-        if (response.ok) {
-            return;
+        try {
+            const response = await fetch(`${POCKETBASE_HOST}/api/health`, { method: 'HEAD' });
+            if (response.ok) {
+                return;
+            }
+        } catch (error) {
+            logger.warn(`PocketBase not reachable, retrying (${i}/${retries})...`);
         }
-
-        logger.warn(`PocketBase not ready, retrying (${i}/${retries})...`);
 
         await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -72,8 +74,8 @@ pocketbaseClient.beforeSend = async function (url, options) {
         logger.info('PocketBase client initialized successfully');
     } catch (err) {
         logger.error('Failed to initialize PocketBase client:', err);
-
-        process.exit(1);
+        logger.warn('API will start but PocketBase-dependent features may not work');
+        // Don't exit - let the API start anyway
     }
 })();
 
