@@ -21,6 +21,23 @@ import videoRegenerateRouter from './video-regenerate.js';
 const router = Router();
 
 export default () => {
+	// Root endpoint
+	router.get('/', (req, res) => {
+		res.json({
+			message: 'AetherVideo API',
+			version: '1.0.0',
+			status: 'running',
+			endpoints: {
+				health: '/health',
+				auth: '/auth',
+				videos: '/videos',
+				credits: '/credits',
+				settings: '/settings',
+				admin: '/admin/*'
+			}
+		});
+	});
+	
 	router.get('/health', healthCheck);
 	router.use('/integrated-ai', integratedAiRouter);
 	router.use('/auth', authRouter);
