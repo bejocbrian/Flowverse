@@ -1,0 +1,11 @@
+# Local artifacts that must NOT go into the image
+pb_data
+pb_data_backup
+pb_snapshots
+pocketbase.exe
+pocketbase_linux
+pocketbase_win.zip
+pb38.zip
+node_modules
+*.log
+.DS_Store
