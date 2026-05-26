@@ -1,0 +1,68 @@
+name: Deploy Web to Hostinger
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Deploy Web
+    runs-on: ubuntu-latest
+    environment: production
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Build web
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_POCKETBASE_URL: ${{ secrets.VITE_POCKETBASE_URL }}
+        run: npm run build --workspace apps/web
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync dist to Hostinger via rsync over SSH
+        env:
+          SSH_USER: ${{ secrets.HOSTINGER_USER }}
+          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '22' }}
+          WEB_REMOTE_DIR: ${{ vars.HOSTINGER_WEB_DIR }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -p $SSH_PORT -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new" \
+            apps/web/dist/ \
+            "$SSH_USER@$SSH_HOST:$WEB_REMOTE_DIR/"

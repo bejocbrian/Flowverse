@@ -1,0 +1,109 @@
+name: Deploy API to Hostinger
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    environment: production
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
+
+      # Install only production deps (locally, then ship them)
+      - name: Install API production dependencies
+        working-directory: apps/api
+        run: npm ci --omit=dev
+
+      - name: Create deployment archive
+        working-directory: apps/api
+        run: |
+          tar -czf ../../api-release.tar.gz \
+            --exclude='./.env*' \
+            --exclude='./.git*' \
+            ./src ./package.json ./package-lock.json ./node_modules
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload archive to Hostinger
+        env:
+          SSH_USER: ${{ secrets.HOSTINGER_USER }}
+          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '22' }}
+          API_REMOTE_DIR: ${{ vars.HOSTINGER_API_DIR }}
+        run: |
+          scp -P "$SSH_PORT" api-release.tar.gz "$SSH_USER@$SSH_HOST:$API_REMOTE_DIR/api-release.tar.gz"
+
+      - name: Extract and restart API on server
+        env:
+          SSH_USER: ${{ secrets.HOSTINGER_USER }}
+          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '22' }}
+          API_REMOTE_DIR: ${{ vars.HOSTINGER_API_DIR }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME || 'api' }}
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -euo pipefail
+            cd "$API_REMOTE_DIR"
+
+            # Backup the current release (if any) so we can roll back
+            if [ -d current ]; then
+              rm -rf previous
+              mv current previous
+            fi
+
+            # Stage and atomically swap
+            mkdir -p staging
+            tar -xzf api-release.tar.gz -C staging
+            mv staging current
+            rm -f api-release.tar.gz
+
+            # Preserve the existing .env file in current/ if you keep it outside the release
+            if [ -f .env ]; then
+              cp .env current/.env
+            fi
+
+            cd current
+
+            # Restart with PM2 if available, otherwise fall back to Hostinger Node.js Application Manager
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 reload "$PM2_APP_NAME" --update-env || pm2 start src/main.js --name "$PM2_APP_NAME" --update-env
+              pm2 save
+            else
+              echo "PM2 not found. Restart the app manually from Hostinger hPanel -> Advanced -> Node.js."
+            fi
+          EOF
