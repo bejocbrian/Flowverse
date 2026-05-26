@@ -30,12 +30,12 @@ export const AuthProvider = ({ children }) => {
     setInitialLoading(false);
   }, []);
 
-  const signup = async (email, password, name) => {
+  const signup = async (email, password, name, turnstileToken) => {
     try {
       const response = await apiServerClient.fetch('/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name })
+        body: JSON.stringify({ email, password, name, turnstileToken })
       });
 
       if (!response.ok) {
@@ -44,13 +44,15 @@ export const AuthProvider = ({ children }) => {
       }
 
       const data = await response.json();
-      
-      await pb.collection('users').authWithPassword(email, password, { $autoCancel: false });
-      
-      setCurrentUser(pb.authStore.model);
+
+      // Use the token our API returned so we don't fire a second
+      // PocketBase auth call (which would also bypass our /auth/login
+      // captcha + rate limits).
+      pb.authStore.save(data.token, data.user);
+      setCurrentUser(data.user);
       setIsAuthenticated(true);
-      setRole(pb.authStore.model.role || 'consumer');
-      
+      setRole(data.user.role || 'consumer');
+
       return data;
     } catch (error) {
       console.error('Signup error:', error);
@@ -58,13 +60,31 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (email, password) => {
+  const login = async (email, password, turnstileToken) => {
     try {
-      const authData = await pb.collection('users').authWithPassword(email, password, { $autoCancel: false });
-      setCurrentUser(authData.record);
+      // Login goes through our API so it can enforce captcha + rate limits
+      // before passing through to PocketBase. The API returns a token we
+      // then load into the local PocketBase authStore so subsequent
+      // PB calls work.
+      const response = await apiServerClient.fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, turnstileToken })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Login failed');
+      }
+
+      const data = await response.json();
+
+      // Push token into PocketBase client so existing PB-based code works.
+      pb.authStore.save(data.token, data.user);
+      setCurrentUser(data.user);
       setIsAuthenticated(true);
-      setRole(authData.record.role || 'consumer');
-      return authData;
+      setRole(data.user.role || 'consumer');
+      return data;
     } catch (error) {
       console.error('Login error:', error);
       throw error;

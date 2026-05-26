@@ -8,6 +8,9 @@ import { Input } from '@/components/ui/input.jsx';
 import { Label } from '@/components/ui/label.jsx';
 import { Chrome, Github } from 'lucide-react';
 import { toast } from 'sonner';
+import TurnstileWidget from '@/components/TurnstileWidget.jsx';
+
+const TURNSTILE_REQUIRED = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -15,13 +18,20 @@ const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (TURNSTILE_REQUIRED && !turnstileToken) {
+      toast('Please complete the captcha');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await login(email, password);
+      await login(email, password, turnstileToken);
       toast('Welcome back');
       navigate('/app/dashboard');
     } catch (error) {
@@ -116,6 +126,8 @@ const LoginPage = () => {
                   Forgot password?
                 </Link>
               </div>
+
+              <TurnstileWidget onToken={setTurnstileToken} className="flex justify-center" />
 
               <Button
                 type="submit"

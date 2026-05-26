@@ -24,6 +24,10 @@ const RegenerateModal = ({ videoId, isOpen, onClose, defaultSettings }) => {
   const handleRegenerate = async () => {
     setLoading(true);
     try {
+      const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       const response = await apiServerClient.fetch(`/videos/${videoId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,7 +36,8 @@ const RegenerateModal = ({ videoId, isOpen, onClose, defaultSettings }) => {
           varyAspectRatio: !sameSettings && varyAspectRatio ? aspectRatio : null,
           varyDuration: !sameSettings && varyDuration ? parseInt(duration) : null,
           varyQuality: !sameSettings && varyQuality ? quality : null,
-          variationCount: parseInt(variationCount)
+          variationCount: parseInt(variationCount),
+          idempotency_key: idempotencyKey,
         })
       });
 

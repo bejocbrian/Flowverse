@@ -18,10 +18,34 @@ router.post('/:id/regenerate', async (req, res) => {
 		varyDuration,
 		varyQuality,
 		variationCount = 1,
+		idempotency_key,
 	} = req.body;
 
 	if (variationCount < 1 || variationCount > 5) {
 		return res.status(400).json({ error: 'variationCount must be between 1 and 5' });
+	}
+
+	// Idempotency: same user + same key in last 5 minutes returns the
+	// previously-created variations instead of charging again.
+	if (idempotency_key && typeof idempotency_key === 'string' && idempotency_key.length <= 100) {
+		try {
+			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+			const existing = await pb.collection('videos').getList(1, 5, {
+				filter: `user_id = "${req.pocketbaseUserId}" && idempotency_key = "${idempotency_key}" && created >= "${fiveMinutesAgo}"`,
+				sort: 'created',
+			});
+
+			if (existing.items.length > 0) {
+				logger.info(`Idempotent regen replay for user ${req.pocketbaseUserId}: ${existing.items.length} videos`);
+				return res.json({
+					generationIds: existing.items.map(v => v.id),
+					totalCost: existing.items.length,
+					idempotent: true,
+				});
+			}
+		} catch (idemErr) {
+			logger.warn('Regen idempotency lookup failed:', idemErr.message);
+		}
 	}
 
 	try {
@@ -69,6 +93,7 @@ router.post('/:id/regenerate', async (req, res) => {
 				credit_cost: creditCost,
 				parent_video_id: id,
 				share_token: randomBytes(16).toString('hex'),
+				...(idempotency_key && { idempotency_key }),
 			});
 
 			generationIds.push(newVideo.id);

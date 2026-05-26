@@ -1,14 +1,53 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
+import { isDisposableEmail } from '../utils/disposableEmails.js';
+import { verifyTurnstile } from '../utils/turnstile.js';
 
 const router = Router();
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Strict rate limits. The global limiter still applies on top of these.
+const signupLimiter = rateLimit({
+	windowMs: 60 * 60 * 1000, // 1 hour
+	max: 5, // 5 signups per hour per IP
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { success: false, error: 'Too many signup attempts. Try again later.' },
+	validate: { trustProxy: false },
+});
+
+const loginLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000, // 15 min
+	max: 10,
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { success: false, error: 'Too many login attempts. Try again later.' },
+	validate: { trustProxy: false },
+});
+
+const passwordResetLimiter = rateLimit({
+	windowMs: 60 * 60 * 1000,
+	max: 5,
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { success: false, error: 'Too many password reset attempts. Try again later.' },
+	validate: { trustProxy: false },
+});
+
 // POST /auth/signup
-router.post('/signup', async (req, res) => {
-	const { email, password, name, role } = req.body || {};
+// Defenses:
+//   1. Rate limit (5/hour/IP)
+//   2. Cloudflare Turnstile token verification (anti-bot)
+//   3. Disposable email domain blocklist
+//   4. NO credits granted here. Credits are issued by a PocketBase hook
+//      when the user's `verified` flag flips to true (email confirmed or
+//      OAuth login). Bots that can sign up but cannot click an email link
+//      get nothing.
+router.post('/signup', signupLimiter, async (req, res) => {
+	const { email, password, name, role, turnstileToken } = req.body || {};
 
 	if (!email || !password || !name) {
 		return res.status(400).json({
@@ -35,15 +74,42 @@ router.post('/signup', async (req, res) => {
 		});
 	}
 
+	const ip = req.ip;
+	const captcha = await verifyTurnstile(turnstileToken, ip);
+	if (!captcha.ok) {
+		logger.warn(`Signup captcha failed: ${captcha.reason} (ip=${ip})`);
+		return res.status(400).json({
+			success: false,
+			error: 'Captcha verification failed. Please try again.',
+		});
+	}
+
+	if (isDisposableEmail(email)) {
+		logger.warn(`Signup blocked - disposable email: ${email}`);
+		return res.status(400).json({
+			success: false,
+			error: 'This email provider is not allowed. Please use a different email.',
+		});
+	}
+
 	try {
 		await pb.collection('users').create({
 			email,
 			password,
 			passwordConfirm: password,
 			name,
-			role: role || 'consumer',
-			credits_balance: 100,
+			role: role === 'admin' ? 'consumer' : (role || 'consumer'),
+			// Credits are NOT granted here. See pb_hooks/grant-initial-credits.pb.js
+			credits_balance: 0,
 		});
+
+		// Trigger PocketBase to send the verification email. If SMTP is not
+		// configured, this no-ops.
+		try {
+			await pb.collection('users').requestVerification(email);
+		} catch (verifyErr) {
+			logger.warn('Could not send verification email:', verifyErr.message);
+		}
 
 		const authData = await pb.collection('users').authWithPassword(email, password);
 
@@ -57,21 +123,24 @@ router.post('/signup', async (req, res) => {
 				name: authData.record.name,
 				role: authData.record.role,
 				credits_balance: authData.record.credits_balance,
+				verified: authData.record.verified,
 			},
 			token: authData.token,
 		});
 	} catch (error) {
 		const msg = error?.message || '';
+		const fieldErrors = error?.data?.data;
 
-		if (msg.includes('duplicate') || msg.includes('already exists') || error?.status === 400) {
-			// PocketBase typically returns 400 with `validation_invalid_email` for duplicates
-			const fieldErrors = error?.data?.data;
-			if (fieldErrors?.email?.code === 'validation_invalid_email' || msg.toLowerCase().includes('email')) {
-				return res.status(400).json({
-					success: false,
-					error: 'Email already exists or is invalid',
-				});
-			}
+		if (
+			msg.includes('duplicate') ||
+			msg.includes('already exists') ||
+			fieldErrors?.email?.code === 'validation_invalid_email' ||
+			fieldErrors?.email
+		) {
+			return res.status(400).json({
+				success: false,
+				error: 'Email already exists or is invalid',
+			});
 		}
 
 		logger.error('Signup error:', msg);
@@ -80,13 +149,23 @@ router.post('/signup', async (req, res) => {
 });
 
 // POST /auth/login
-router.post('/login', async (req, res) => {
-	const { email, password } = req.body || {};
+router.post('/login', loginLimiter, async (req, res) => {
+	const { email, password, turnstileToken } = req.body || {};
 
 	if (!email || !password) {
 		return res.status(400).json({
 			success: false,
 			error: 'Email and password are required',
+		});
+	}
+
+	const ip = req.ip;
+	const captcha = await verifyTurnstile(turnstileToken, ip);
+	if (!captcha.ok) {
+		logger.warn(`Login captcha failed: ${captcha.reason} (ip=${ip})`);
+		return res.status(400).json({
+			success: false,
+			error: 'Captcha verification failed. Please try again.',
 		});
 	}
 
@@ -101,6 +180,7 @@ router.post('/login', async (req, res) => {
 				name: authData.record.name,
 				role: authData.record.role,
 				credits_balance: authData.record.credits_balance,
+				verified: authData.record.verified,
 			},
 			token: authData.token,
 		});
@@ -118,15 +198,14 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /auth/logout
-// Logout is client-side: the frontend drops its token. We must NOT call
-// pb.authStore.clear() here because `pb` is the shared API-side superuser
-// client and clearing it would break every subsequent PocketBase call.
+// Logout is client-side: the frontend drops its token. Do NOT call
+// pb.authStore.clear() here - that would log the API's superuser out.
 router.post('/logout', async (_req, res) => {
 	res.json({ success: true });
 });
 
 // POST /auth/reset-password
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', passwordResetLimiter, async (req, res) => {
 	const { email } = req.body || {};
 
 	if (!email) {
@@ -140,7 +219,6 @@ router.post('/reset-password', async (req, res) => {
 		logger.warn('Password reset attempt error (suppressed):', error.message);
 	}
 
-	// Always respond the same way.
 	res.json({
 		success: true,
 		message: 'If an account exists with this email, a password reset link has been sent',

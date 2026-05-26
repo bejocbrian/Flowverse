@@ -169,6 +169,13 @@ const GeneratePage = () => {
     setGeneratedResult(null);
 
     try {
+      // Generate a fresh idempotency key per submit. If the network call
+      // retries (e.g. user double-clicks), the API uses this to return the
+      // same video instead of charging twice.
+      const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       const response = await apiServerClient.fetch('/videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,6 +188,7 @@ const GeneratePage = () => {
           model: selectedModel.id,
           output_type: 'video',
           mode_image: mode === 'Frames' ? 'frame' : 'ingredient',
+          idempotency_key: idempotencyKey,
         })
       });
 

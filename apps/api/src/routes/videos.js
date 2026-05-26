@@ -71,10 +71,49 @@ router.get('/', async (req, res) => {
 
 // POST /videos - Create video/image generation request and submit to GeminiGen
 router.post('/', async (req, res) => {
-	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, output_type } = req.body;
+	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, output_type, idempotency_key } = req.body;
 
 	if (!prompt || !provider || !model) {
 		return res.status(400).json({ error: 'prompt, provider, and model are required' });
+	}
+
+	// Idempotency: if the same user re-submits the same key within 5 minutes,
+	// return the existing video instead of creating a new charge. The key is
+	// generated client-side per "intent to generate" - retrying a failed
+	// network request reuses the key, two double-clicks reuse the key.
+	if (idempotency_key && typeof idempotency_key === 'string' && idempotency_key.length <= 100) {
+		try {
+			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+			const existing = await pb.collection('videos').getList(1, 1, {
+				filter: `user_id = "${req.pocketbaseUserId}" && idempotency_key = "${idempotency_key}" && created >= "${fiveMinutesAgo}"`,
+			});
+
+			if (existing.items.length > 0) {
+				const v = existing.items[0];
+				logger.info(`Idempotent replay: returning existing video ${v.id} for user ${req.pocketbaseUserId}`);
+				return res.json({
+					video: {
+						id: v.id,
+						prompt: v.prompt,
+						negative_prompt: v.negative_prompt,
+						status: v.status,
+						aspect_ratio: v.aspect_ratio,
+						duration: v.duration,
+						quality: v.quality,
+						provider: v.provider,
+						model: v.model,
+						output_type: v.output_type,
+						credit_cost: v.credit_cost,
+						created: v.created,
+					},
+					idempotent: true,
+				});
+			}
+		} catch (idemErr) {
+			// If the lookup fails for any reason (collection field not yet
+			// migrated, etc.), fall through and proceed with a fresh create.
+			logger.warn('Idempotency lookup failed, proceeding:', idemErr.message);
+		}
 	}
 
 	const isImage = output_type === 'image';
@@ -110,6 +149,7 @@ router.post('/', async (req, res) => {
 				output_type: output_type || 'video',
 				credit_cost: creditCost,
 				share_token: randomBytes(16).toString('hex'),
+				...(idempotency_key && { idempotency_key }),
 			});
 
 			// 4. Create transaction record

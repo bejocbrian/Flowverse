@@ -9,6 +9,9 @@ import { Label } from '@/components/ui/label.jsx';
 import { Checkbox } from '@/components/ui/checkbox.jsx';
 import { Chrome, Github } from 'lucide-react';
 import { toast } from 'sonner';
+import TurnstileWidget from '@/components/TurnstileWidget.jsx';
+
+const TURNSTILE_REQUIRED = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 const SignupPage = () => {
   const navigate = useNavigate();
@@ -18,6 +21,7 @@ const SignupPage = () => {
   const [password, setPassword] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,11 +31,16 @@ const SignupPage = () => {
       return;
     }
 
+    if (TURNSTILE_REQUIRED && !turnstileToken) {
+      toast('Please complete the captcha');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await signup(email, password, name);
-      toast('Account created successfully');
+      await signup(email, password, name, turnstileToken);
+      toast('Account created. Check your email to verify and unlock free credits.');
       navigate('/onboarding');
     } catch (error) {
       let errorMessage = 'Signup failed. Please try again.';
@@ -199,6 +208,8 @@ const SignupPage = () => {
                   </Link>
                 </Label>
               </div>
+
+              <TurnstileWidget onToken={setTurnstileToken} className="flex justify-center" />
 
               <Button
                 type="submit"
