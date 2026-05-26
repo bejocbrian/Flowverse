@@ -3,6 +3,8 @@ import { Helmet } from 'react-helmet';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
 	ArrowUp,
+	Check,
+	ChevronDown,
 	Coins,
 	Loader2,
 	Plus,
@@ -17,6 +19,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import VideoPlayer from '@/components/VideoPlayer.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover.jsx';
 
 const ASPECT_RATIOS = [
 	{ id: '16:9', label: '16:9', icon: RectangleHorizontal },
@@ -40,6 +43,7 @@ const SettingsPanel = ({
 	open,
 	onClose,
 	models,
+	selectedModel,
 	selectedModelKey,
 	onSelectModel,
 	resolution,
@@ -139,35 +143,68 @@ const SettingsPanel = ({
 				</div>
 			)}
 
-			{/* Model picker */}
+			{/* Model picker (compact, in popover) */}
 			<div className="flex flex-col gap-2">
 				<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Model</label>
-				<div className="flex flex-col gap-1.5">
-					{models.map((m) => {
-						const active = m.key === selectedModelKey;
-						return (
-							<button
-								key={m.key}
-								onClick={() => onSelectModel(m)}
-								className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
-									active
-										? 'bg-white/10 border border-white/20 text-white'
-										: 'bg-black/30 border border-transparent text-white/60 hover:text-white hover:bg-black/50'
-								}`}
-							>
-								<span className="flex flex-col">
-									<span className="leading-tight">{m.label}</span>
-									<span className="text-[10px] text-white/40 font-mono">{m.provider}</span>
+				<Popover>
+					<PopoverTrigger asChild>
+						<button
+							type="button"
+							className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-sm text-white hover:bg-black/60 transition-colors text-left"
+						>
+							<span className="flex flex-col min-w-0">
+								<span className="leading-tight truncate">
+									{selectedModel?.label ?? 'Select model'}
 								</span>
-								{m.credits && active && (
-									<span className="text-[10px] font-mono text-white/40 whitespace-nowrap">
-										{Math.min(...Object.values(m.credits))}–{Math.max(...Object.values(m.credits))} cr
+								{selectedModel?.provider && (
+									<span className="text-[10px] text-white/40 font-mono truncate">
+										{selectedModel.provider}
 									</span>
 								)}
-							</button>
-						);
-					})}
-				</div>
+							</span>
+							<ChevronDown className="w-4 h-4 text-white/50 shrink-0" />
+						</button>
+					</PopoverTrigger>
+					<PopoverContent
+						align="start"
+						sideOffset={6}
+						className="w-[var(--radix-popover-trigger-width)] max-h-[300px] overflow-y-auto p-1.5 bg-[#1a1b1e]/95 backdrop-blur-3xl border-white/10"
+					>
+						<div className="flex flex-col gap-1">
+							{models.map((m) => {
+								const active = m.key === selectedModelKey;
+								const minCr = m.credits ? Math.min(...Object.values(m.credits)) : null;
+								const maxCr = m.credits ? Math.max(...Object.values(m.credits)) : null;
+								return (
+									<button
+										key={m.key}
+										onClick={() => onSelectModel(m)}
+										className={`w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-lg text-sm transition-colors text-left ${
+											active
+												? 'bg-white/10 text-white'
+												: 'text-white/70 hover:text-white hover:bg-white/5'
+										}`}
+									>
+										<span className="flex flex-col min-w-0">
+											<span className="leading-tight truncate">{m.label}</span>
+											<span className="text-[10px] text-white/40 font-mono truncate">
+												{m.provider}
+											</span>
+										</span>
+										<span className="flex items-center gap-2 shrink-0">
+											{minCr !== null && (
+												<span className="text-[10px] font-mono text-white/40 whitespace-nowrap">
+													{minCr === maxCr ? `${minCr}` : `${minCr}–${maxCr}`} cr
+												</span>
+											)}
+											{active && <Check className="w-4 h-4 text-white" />}
+										</span>
+									</button>
+								);
+							})}
+						</div>
+					</PopoverContent>
+				</Popover>
 			</div>
 
 			{/* Cost summary */}
@@ -519,10 +556,10 @@ const GeneratePage = () => {
 									open={showSettings}
 									onClose={() => setShowSettings(false)}
 									models={models}
+									selectedModel={selectedModel}
 									selectedModelKey={selectedModelKey}
 									onSelectModel={(m) => {
 										setSelectedModelKey(m.key);
-										setShowSettings(false);
 									}}
 									resolution={resolution}
 									onSelectResolution={setResolution}
