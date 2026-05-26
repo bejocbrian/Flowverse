@@ -1,4 +1,5 @@
-const API_SERVER_URL = '/hcgi/api';
+// Use environment variable in production, proxy path in development
+const API_SERVER_URL = import.meta.env.VITE_API_URL || '/hcgi/api';
 
 function getPocketbaseToken() {
 	const pocketbaseToken = localStorage.getItem('pocketbase_auth');

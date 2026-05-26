@@ -1,5 +1,8 @@
 node_modules
 
+# Build output (generated locally, not for the repo)
+apps/web/dist/
+
 # Environment files (contain secrets). Only .env.example is tracked.
 .env
 .env.*
