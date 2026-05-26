@@ -1,0 +1,88 @@
+name: Deploy to Railway
+
+on:
+  # Auto-deploy on push to main after CI completes successfully
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+  # Manual trigger to deploy a specific service
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Which service to deploy
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - api
+          - web
+      environment:
+        description: Target environment
+        type: choice
+        required: true
+        default: production
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: deploy-${{ github.ref }}-${{ inputs.service || 'all' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Skip auto-deploys if CI was not successful
+  guard:
+    name: Guard
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      service: ${{ steps.compute.outputs.service }}
+    steps:
+      - id: compute
+        run: |
+          service="${{ inputs.service || 'all' }}"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
+
+  deploy-api:
+    name: Deploy API
+    needs: guard
+    if: ${{ needs.guard.outputs.service == 'all' || needs.guard.outputs.service == 'api' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy API to Railway
+        working-directory: apps/api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: railway up --service "${{ vars.RAILWAY_API_SERVICE_NAME || 'api' }}" --ci
+
+  deploy-web:
+    name: Deploy Web
+    needs: guard
+    if: ${{ needs.guard.outputs.service == 'all' || needs.guard.outputs.service == 'web' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy Web to Railway
+        working-directory: apps/web
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_WEB_TOKEN }}
+        run: railway up --service "${{ vars.RAILWAY_WEB_SERVICE_NAME || 'web' }}" --ci

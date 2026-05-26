@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel previous in-progress runs for the same ref
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Detect which app(s) changed so we only run relevant jobs
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+      root: ${{ steps.filter.outputs.root }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'apps/web/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+            root:
+              - 'package.json'
+              - 'package-lock.json'
+
+  lint-api:
+    name: Lint API
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Lint
+        run: npm run lint --workspace apps/api
+
+  lint-build-web:
+    name: Lint & Build Web
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Lint
+        run: npm run lint --workspace apps/web
+
+      - name: Build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://api.placeholder.local' }}
+          VITE_POCKETBASE_URL: ${{ secrets.VITE_POCKETBASE_URL || 'https://pb.placeholder.local' }}
+        run: npm run build --workspace apps/web
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-${{ github.sha }}
+          path: apps/web/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  # Aggregator job - lets you require a single status check on the branch
+  ci:
+    name: CI
+    needs: [lint-api, lint-build-web]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all required jobs passed
+        env:
+          API_RESULT: ${{ needs.lint-api.result }}
+          WEB_RESULT: ${{ needs.lint-build-web.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for r in "$API_RESULT" "$WEB_RESULT"; do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "Required job failed with result: $r"
+              fail=1
+            fi
+          done
+          exit "$fail"
