@@ -20,8 +20,7 @@ RUN apk add --no-cache curl unzip ca-certificates \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata \
-	&& addgroup -S pb && adduser -S -G pb pb
+RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
@@ -29,17 +28,16 @@ COPY --from=fetcher /pb/pocketbase /app/pocketbase
 COPY pb_migrations /app/pb_migrations
 COPY pb_hooks /app/pb_hooks
 
-# Persistent data dir. On Railway, mount a volume here.
-RUN mkdir -p /pb_data && chown -R pb:pb /pb_data /app
-
-USER pb
+# /pb_data is the persistent SQLite + uploads directory.
+# On Railway, attach a volume mounted here. We run as root because the
+# Railway volume is mounted root-owned and PocketBase needs to create files
+# in it on first boot. Container isolation is the security boundary.
+RUN mkdir -p /pb_data
 
 EXPOSE 8080
-
-# Railway provides $PORT. Default to 8080 locally.
 ENV PORT=8080
 
-# Use shell form so $PORT expands at runtime.
+# Shell form so $PORT expands at runtime.
 CMD /app/pocketbase serve \
 	--http=0.0.0.0:${PORT} \
 	--dir=/pb_data \
