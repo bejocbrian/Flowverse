@@ -1,213 +1,293 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
+import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
+import {
+	Coins,
+	TrendingUp,
+	TrendingDown,
+	Loader2,
+	CreditCard,
+	History as HistoryIcon,
+	Gift,
+	RotateCcw,
+	Sparkles,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
-import { Coins, TrendingUp, TrendingDown, Clock, ShieldCheck, CreditCard } from 'lucide-react';
-import pb from '@/lib/pocketbaseClient.js';
+import apiServerClient from '@/lib/apiServerClient.js';
 import StripeCheckoutButton from '@/components/StripeCheckoutButton.jsx';
 
 const STRIPE_PACKAGES = [
-  { credits: 50, price: 4.99, popular: false },
-  { credits: 100, price: 8.99, popular: true },
-  { credits: 500, price: 39.99, popular: false }
+	{ credits: 50, price: 4.99, popular: false, label: 'Starter' },
+	{ credits: 100, price: 8.99, popular: true, label: 'Standard' },
+	{ credits: 500, price: 39.99, popular: false, label: 'Studio' },
 ];
 
+/* -------------------------------------------------------------------------- */
+/*  Transaction utilities                                                     */
+/* -------------------------------------------------------------------------- */
+
+// `generation` charges credits (negative effect on balance).
+// `purchase`, `bonus`, `refund` add credits.
+const CREDIT_TYPES = new Set(['purchase', 'bonus', 'refund']);
+const DEBIT_TYPES = new Set(['generation']);
+
+function txDirection(type) {
+	if (CREDIT_TYPES.has(type)) return 'credit';
+	if (DEBIT_TYPES.has(type)) return 'debit';
+	return 'unknown';
+}
+
+const TYPE_META = {
+	generation: { label: 'Generation', icon: TrendingDown, accent: 'text-amber-300' },
+	refund: { label: 'Refund', icon: RotateCcw, accent: 'text-blue-300' },
+	bonus: { label: 'Bonus', icon: Gift, accent: 'text-emerald-300' },
+	purchase: { label: 'Purchase', icon: CreditCard, accent: 'text-emerald-300' },
+};
+
+function timeAgo(iso) {
+	if (!iso) return '';
+	const ms = Date.now() - new Date(iso).getTime();
+	const s = Math.floor(ms / 1000);
+	if (s < 60) return `${s}s ago`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 86400);
+	if (d < 7) return `${d}d ago`;
+	return new Date(iso).toLocaleDateString();
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Page                                                                      */
+/* -------------------------------------------------------------------------- */
+
 const WalletPage = () => {
-  const { currentUser } = useAuth();
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('wallet'); // 'wallet' | 'buy'
+	const { currentUser } = useAuth();
+	const [transactions, setTransactions] = useState([]);
+	const [loading, setLoading] = useState(true);
+	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [currentUser]);
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			setLoading(true);
+			try {
+				const res = await apiServerClient.fetch('/wallet/balance');
+				if (!res.ok) throw new Error('Failed to load wallet');
+				const data = await res.json();
+				if (cancelled) return;
+				setTransactions(data.transactions || []);
+			} catch (err) {
+				if (!cancelled) toast.error(err.message || 'Could not load wallet');
+			} finally {
+				if (!cancelled) setLoading(false);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
-  const fetchTransactions = async () => {
-    if (!currentUser) return;
-    setLoading(true);
-    try {
-      const records = await pb.collection('transactions').getFullList({
-        filter: `user_id = "${currentUser.id}"`,
-        sort: '-created',
-        $autoCancel: false
-      });
-      setTransactions(records);
-    } catch (error) {
-      console.error('Failed to fetch transactions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+	const stats = useMemo(() => {
+		let totalSpent = 0;
+		let totalEarned = 0;
+		for (const t of transactions) {
+			const dir = txDirection(t.type);
+			const amount = Math.abs(t.amount || 0);
+			if (dir === 'credit') totalEarned += amount;
+			else if (dir === 'debit') totalSpent += amount;
+		}
+		return { totalSpent, totalEarned };
+	}, [transactions]);
 
-  const getTypeIcon = (type) => {
-    if (type === 'credit') return <TrendingUp className="w-4 h-4 text-emerald-500" />;
-    return <TrendingDown className="w-4 h-4 text-[hsl(var(--warning))]" />;
-  };
+	const balance = currentUser?.credits_balance ?? 0;
 
-  return (
-    <>
-      <Helmet>
-        <title>Wallet & Credits - AI Video Studio</title>
-        <meta name="description" content="Manage your credits and billing" />
-      </Helmet>
+	return (
+		<>
+			<Helmet>
+				<title>Wallet - Aether Video</title>
+			</Helmet>
 
-      <div className="min-h-[calc(100vh-64px)] bg-[hsl(var(--canvas))] py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto space-y-10">
+			<div className="flex-1 overflow-y-auto bg-black text-white">
+				<div className="max-w-5xl mx-auto px-4 sm:px-8 py-8">
+					{/* Header */}
+					<div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+						<div>
+							<p className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-primary))] mb-1">
+								Wallet
+							</p>
+							<h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Credits and billing</h1>
+							<p className="text-sm text-white/50 mt-1">
+								Buy credits, review activity, and track spend.
+							</p>
+						</div>
+					</div>
 
-          {/* Balance card */}
-          <div className="glass-surface rounded-3xl p-8 sm:p-12 text-center shadow-glass-lg relative overflow-hidden">
-            <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-[hsl(var(--accent-primary))]/5 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-[hsl(var(--accent-secondary))]/5 rounded-full blur-3xl pointer-events-none" />
-            
-            <div className="w-24 h-24 rounded-full bg-[hsl(var(--accent-primary))]/10 border border-[hsl(var(--accent-primary))]/20 flex items-center justify-center mx-auto mb-6 relative z-10">
-              <Coins className="w-12 h-12 text-[hsl(var(--accent-primary))]" />
-            </div>
-            <h1 className="text-6xl md:text-7xl font-bold mb-4 font-mono tracking-tight relative z-10">
-              {currentUser?.credits_balance || 0}
-            </h1>
-            <p className="text-lg text-[hsl(var(--text-secondary))] relative z-10">Available credits</p>
-          </div>
+					{/* Balance + KPIs */}
+					<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+						<motion.div
+							initial={{ opacity: 0, y: 12 }}
+							animate={{ opacity: 1, y: 0 }}
+							className="lg:col-span-1 relative overflow-hidden bg-gradient-to-br from-[hsl(var(--accent-primary))]/15 via-white/[0.03] to-[hsl(var(--accent-secondary))]/10 border border-white/10 rounded-2xl p-6"
+						>
+							<div className="flex items-center gap-2 text-xs uppercase tracking-wider text-white/50 font-mono mb-2">
+								<Coins className="w-4 h-4 text-[hsl(var(--accent-primary))]" />
+								Balance
+							</div>
+							<div className="flex items-baseline gap-2">
+								<span className="text-5xl font-semibold tracking-tight">{balance}</span>
+								<span className="text-sm text-white/40">credits</span>
+							</div>
+							<button
+								onClick={() => setTab('buy')}
+								className="mt-5 inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--accent-primary))] hover:underline"
+							>
+								Buy more <CreditCard className="w-3.5 h-3.5" />
+							</button>
+						</motion.div>
 
-          {/* Tab switcher */}
-          <div className="flex gap-2 bg-[hsl(var(--surface))] rounded-2xl p-1 border border-[hsl(var(--border))]">
-            <button
-              onClick={() => setActiveTab('wallet')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'wallet' ? 'bg-[hsl(var(--accent-primary))] text-white' : 'text-[hsl(var(--text-secondary))] hover:text-white'
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              Admin Credits
-            </button>
-            <button
-              onClick={() => setActiveTab('buy')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
-                activeTab === 'buy' ? 'bg-[hsl(var(--accent-primary))] text-white' : 'text-[hsl(var(--text-secondary))] hover:text-white'
-              }`}
-            >
-              <CreditCard className="w-4 h-4" />
-              Buy Credits
-            </button>
-          </div>
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5 flex flex-col gap-2">
+							<span className="p-2 rounded-lg w-fit bg-amber-500/10 text-amber-300">
+								<TrendingDown className="w-4 h-4" />
+							</span>
+							<p className="text-3xl font-semibold tracking-tight">{stats.totalSpent}</p>
+							<p className="text-xs text-white/50">Spent on generations</p>
+						</div>
 
-          {/* Admin credits info */}
-          {activeTab === 'wallet' && (
-            <div className="glass-surface rounded-2xl p-8 border border-[hsl(var(--border))]">
-              <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
-                Admin-Managed Credits
-              </h2>
-              <p className="text-[hsl(var(--text-secondary))] text-sm leading-relaxed">
-                Your credit balance is managed by the platform administrators. Credits are allocated based on your plan or subscription. 
-                If you need additional credits, please contact support or purchase them via the <button onClick={() => setActiveTab('buy')} className="text-[hsl(var(--accent-primary))] underline underline-offset-2">Buy Credits</button> tab.
-              </p>
-            </div>
-          )}
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5 flex flex-col gap-2">
+							<span className="p-2 rounded-lg w-fit bg-emerald-500/10 text-emerald-300">
+								<TrendingUp className="w-4 h-4" />
+							</span>
+							<p className="text-3xl font-semibold tracking-tight">{stats.totalEarned}</p>
+							<p className="text-xs text-white/50">Bonuses, refunds, purchases</p>
+						</div>
+					</div>
 
-          {/* Stripe purchase section */}
-          {activeTab === 'buy' && (
-            <div>
-              <h2 className="text-2xl font-bold mb-8">Purchase Credits</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {STRIPE_PACKAGES.map((pkg) => (
-                  <div
-                    key={pkg.credits}
-                    className={`glass-surface rounded-2xl p-8 relative flex flex-col ${
-                      pkg.popular ? 'ring-2 ring-[hsl(var(--accent-primary))]' : 'border border-[hsl(var(--border))] hover:border-[hsl(var(--accent-primary))]/50 transition-colors'
-                    }`}
-                  >
-                    {pkg.popular && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-[hsl(var(--accent-primary))] text-xs font-bold text-white uppercase tracking-wider">
-                        Most Popular
-                      </div>
-                    )}
-                    
-                    <div className="text-center mb-8 flex-1">
-                      <p className="text-5xl font-bold mb-2 text-white">{pkg.credits}</p>
-                      <p className="text-[hsl(var(--text-secondary))] uppercase text-sm tracking-wider font-medium">credits</p>
-                    </div>
+					{/* Tab switcher */}
+					<div className="flex gap-1 p-1 rounded-full border border-white/10 bg-white/[0.03] w-fit mb-6">
+						<button
+							onClick={() => setTab('overview')}
+							className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+								tab === 'overview' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
+							}`}
+						>
+							<HistoryIcon className="w-3.5 h-3.5 inline mr-1.5" />
+							Activity
+						</button>
+						<button
+							onClick={() => setTab('buy')}
+							className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+								tab === 'buy' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
+							}`}
+						>
+							<CreditCard className="w-3.5 h-3.5 inline mr-1.5" />
+							Buy credits
+						</button>
+					</div>
 
-                    <div className="text-center mb-8">
-                      <p className="text-4xl font-bold text-white mb-2">${pkg.price}</p>
-                      <p className="text-sm text-[hsl(var(--text-secondary))]">
-                        ${(pkg.price / pkg.credits).toFixed(3)} per credit
-                      </p>
-                    </div>
-
-                    <StripeCheckoutButton 
-                      creditAmount={pkg.credits}
-                      price={pkg.price}
-                      popular={pkg.popular}
-                      className="w-full h-12 text-lg"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Transaction history */}
-          <div>
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-2xl font-bold">Transaction History</h2>
-              <div className="text-sm text-[hsl(var(--text-secondary))] flex items-center gap-2">
-                <Clock className="w-4 h-4" /> Recent
-              </div>
-            </div>
-            
-            <div className="glass-surface rounded-2xl overflow-hidden shadow-glass">
-              {loading ? (
-                <div className="p-16 text-center">
-                  <div className="w-8 h-8 border-t-2 border-[hsl(var(--accent-primary))] rounded-full animate-spin mx-auto mb-4" />
-                  <p className="text-[hsl(var(--text-secondary))]">Loading transactions...</p>
-                </div>
-              ) : transactions.length === 0 ? (
-                <div className="p-16 text-center">
-                  <Coins className="w-12 h-12 text-[hsl(var(--border))] mx-auto mb-4" />
-                  <p className="text-[hsl(var(--text-secondary))]">No transactions yet</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className="bg-[hsl(var(--surface))] border-b border-[hsl(var(--border))]">
-                      <tr>
-                        <th className="py-4 px-6 text-sm font-medium text-[hsl(var(--text-secondary))]">Date</th>
-                        <th className="py-4 px-6 text-sm font-medium text-[hsl(var(--text-secondary))]">Description</th>
-                        <th className="py-4 px-6 text-sm font-medium text-[hsl(var(--text-secondary))] text-right">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[hsl(var(--border))]">
-                      {transactions.map((transaction) => (
-                        <tr key={transaction.id} className="hover:bg-[hsl(var(--elevated))] transition-colors">
-                          <td className="py-4 px-6 text-sm font-mono text-[hsl(var(--text-secondary))]">
-                            {new Date(transaction.created).toLocaleDateString()}
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="flex items-center gap-2">
-                              {getTypeIcon(transaction.type)}
-                              <span className="text-sm font-medium">
-                                {transaction.description || transaction.type}
-                              </span>
-                            </div>
-                          </td>
-                          <td className={`py-4 px-6 text-right font-mono font-medium ${
-                            transaction.type === 'credit' ? 'text-emerald-500' : 'text-[hsl(var(--warning))]'
-                          }`}>
-                            {transaction.type === 'credit' ? '+' : '-'}{Math.abs(transaction.amount)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </>
-  );
+					{tab === 'buy' ? (
+						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+							{STRIPE_PACKAGES.map((pkg) => (
+								<motion.div
+									key={pkg.credits}
+									initial={{ opacity: 0, y: 12 }}
+									whileInView={{ opacity: 1, y: 0 }}
+									viewport={{ once: true }}
+									className={`relative bg-white/[0.03] border rounded-2xl p-7 flex flex-col ${
+										pkg.popular
+											? 'border-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
+											: 'border-white/10'
+									}`}
+								>
+									{pkg.popular && (
+										<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white">
+											Most popular
+										</div>
+									)}
+									<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60">
+										{pkg.label}
+									</h3>
+									<div className="mt-3 mb-1 flex items-baseline gap-2">
+										<span className="text-5xl font-bold tracking-tight">{pkg.credits}</span>
+										<span className="text-sm text-white/40">credits</span>
+									</div>
+									<p className="text-2xl font-semibold mt-4">${pkg.price}</p>
+									<p className="text-xs text-white/40 mt-0.5 mb-6">
+										${(pkg.price / pkg.credits).toFixed(3)} per credit
+									</p>
+									<StripeCheckoutButton
+										creditAmount={pkg.credits}
+										price={pkg.price}
+										popular={pkg.popular}
+										className="w-full mt-auto"
+									/>
+								</motion.div>
+							))}
+						</div>
+					) : loading ? (
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
+							<Loader2 className="w-6 h-6 animate-spin text-white/40" />
+						</div>
+					) : transactions.length === 0 ? (
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+							<Sparkles className="w-8 h-8 mx-auto text-[hsl(var(--accent-primary))] mb-3" />
+							<h2 className="text-lg font-semibold mb-1">No activity yet</h2>
+							<p className="text-sm text-white/50 mb-5">
+								Generate something or buy credits to see your activity here.
+							</p>
+							<Link
+								to="/app/generate"
+								className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:scale-105 transition-transform"
+							>
+								<Sparkles className="w-3.5 h-3.5" />
+								Start creating
+							</Link>
+						</div>
+					) : (
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden">
+							<ul className="divide-y divide-white/5">
+								{transactions.map((t) => {
+									const meta = TYPE_META[t.type] || {
+										label: t.type,
+										icon: Coins,
+										accent: 'text-white/60',
+									};
+									const Icon = meta.icon;
+									const dir = txDirection(t.type);
+									const amount = Math.abs(t.amount || 0);
+									const sign = dir === 'credit' ? '+' : dir === 'debit' ? '−' : '';
+									const amountColor =
+										dir === 'credit' ? 'text-emerald-300' : dir === 'debit' ? 'text-amber-300' : 'text-white/60';
+									return (
+										<li key={t.id} className="px-5 py-3.5 flex items-center gap-3">
+											<span className={`p-2 rounded-lg bg-white/5 ${meta.accent}`}>
+												<Icon className="w-4 h-4" />
+											</span>
+											<div className="flex-1 min-w-0">
+												<p className="text-sm font-medium truncate">
+													{t.description || meta.label}
+												</p>
+												<p className="text-[11px] text-white/40 font-mono">
+													{meta.label} · {timeAgo(t.created)}
+												</p>
+											</div>
+											<div className={`font-mono text-sm font-medium ${amountColor}`}>
+												{sign}
+												{amount}
+											</div>
+										</li>
+									);
+								})}
+							</ul>
+						</div>
+					)}
+				</div>
+			</div>
+		</>
+	);
 };
 
 export default WalletPage;

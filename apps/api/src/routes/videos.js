@@ -370,4 +370,29 @@ router.delete('/:id', async (req, res) => {
 	}
 });
 
+// DELETE /videos/:id - delete a video the authenticated user owns.
+// PocketBase delete rules already enforce user-scope, but we double-check
+// here so the API can return clean error codes.
+router.delete('/:id', async (req, res) => {
+	const { id } = req.params;
+	if (!req.pocketbaseUserId) {
+		return res.status(401).json({ error: 'Authentication required' });
+	}
+	try {
+		const video = await pb.collection('videos').getOne(id);
+		if (video.user_id !== req.pocketbaseUserId) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+		await pb.collection('videos').delete(id);
+		logger.info(`Video deleted via API: ${id}`);
+		return res.json({ success: true });
+	} catch (error) {
+		logger.error('Delete video error:', error.message);
+		if (error?.status === 404 || (error?.message || '').includes('not found')) {
+			return res.status(404).json({ error: 'Video not found' });
+		}
+		return res.status(500).json({ error: 'Failed to delete video' });
+	}
+});
+
 export default router;

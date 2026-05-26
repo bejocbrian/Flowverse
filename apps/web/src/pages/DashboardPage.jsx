@@ -1,149 +1,354 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+	ArrowUpRight,
+	BarChart3,
+	Coins,
+	Loader2,
+	Play,
+	Plus,
+	Sparkles,
+	Wallet,
+	XCircle,
+} from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext.jsx';
+import apiServerClient from '@/lib/apiServerClient.js';
+import { toast } from 'sonner';
+
+/* -------------------------------------------------------------------------- */
+
+const STATUS_BADGE = {
+	completed: { label: 'Completed', className: 'bg-emerald-500/15 text-emerald-300' },
+	queued: { label: 'Queued', className: 'bg-blue-500/15 text-blue-300' },
+	processing: { label: 'Processing', className: 'bg-blue-500/15 text-blue-300' },
+	generating: { label: 'Generating', className: 'bg-blue-500/15 text-blue-300' },
+	failed: { label: 'Failed', className: 'bg-red-500/15 text-red-300' },
+};
+
+function timeAgo(iso) {
+	if (!iso) return '';
+	const ms = Date.now() - new Date(iso).getTime();
+	const s = Math.floor(ms / 1000);
+	if (s < 60) return `${s}s ago`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 86400);
+	if (d < 7) return `${d}d ago`;
+	return new Date(iso).toLocaleDateString();
+}
+
+/* -------------------------------------------------------------------------- */
+
+const StatPill = ({ icon: Icon, label, value, hint, accent }) => (
+	<div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 flex items-center gap-3">
+		<span className={`p-2 rounded-lg ${accent || 'bg-white/5 text-[hsl(var(--accent-primary))]'}`}>
+			<Icon className="w-4 h-4" />
+		</span>
+		<div className="min-w-0">
+			<p className="text-xl font-semibold tracking-tight leading-none">{value}</p>
+			<p className="text-[11px] text-white/40 mt-1">{label}</p>
+			{hint && <p className="text-[10px] text-white/30 font-mono mt-0.5 truncate">{hint}</p>}
+		</div>
+	</div>
+);
+
+const Tile = ({ video }) => {
+	const isImage = video.output_type === 'image';
+	const completed = video.status === 'completed' && !!video.video_url;
+	const failed = video.status === 'failed';
+
+	return (
+		<Link
+			to={`/app/library/${video.id}`}
+			className="bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden group hover:border-white/20 transition-colors"
+		>
+			<div className="aspect-video bg-black relative overflow-hidden flex items-center justify-center">
+				{completed ? (
+					isImage ? (
+						<img
+							src={video.video_url}
+							alt={video.prompt}
+							loading="lazy"
+							className="absolute inset-0 w-full h-full object-cover"
+						/>
+					) : video.thumbnail_url ? (
+						<img
+							src={video.thumbnail_url}
+							alt={video.prompt}
+							loading="lazy"
+							className="absolute inset-0 w-full h-full object-cover"
+						/>
+					) : (
+						<video
+							src={video.video_url}
+							muted
+							playsInline
+							preload="metadata"
+							className="absolute inset-0 w-full h-full object-cover"
+						/>
+					)
+				) : failed ? (
+					<XCircle className="w-7 h-7 text-red-300" />
+				) : (
+					<Loader2 className="w-6 h-6 animate-spin text-[hsl(var(--accent-primary))]" />
+				)}
+
+				{completed && !isImage && (
+					<div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-colors">
+						<Play className="w-9 h-9 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+					</div>
+				)}
+			</div>
+			<div className="p-3">
+				<p className="text-xs font-medium leading-snug line-clamp-2 mb-1">{video.prompt}</p>
+				<p className="text-[10px] text-white/40 font-mono">{timeAgo(video.created)}</p>
+			</div>
+		</Link>
+	);
+};
+
+/* -------------------------------------------------------------------------- */
 
 const DashboardPage = () => {
-  const navigate = useNavigate();
+	const { currentUser } = useAuth();
+	const [overview, setOverview] = useState(null);
+	const [recent, setRecent] = useState(null);
+	const [loading, setLoading] = useState(true);
 
-  return (
-    <>
-      <Helmet>
-        <title>Dashboard - Aether Video</title>
-      </Helmet>
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			setLoading(true);
+			try {
+				const [oRes, rRes] = await Promise.all([
+					apiServerClient.fetch('/users/me/analytics/overview'),
+					apiServerClient.fetch('/users/me/analytics/recent'),
+				]);
+				const o = oRes.ok ? await oRes.json() : null;
+				const r = rRes.ok ? await rRes.json() : null;
+				if (cancelled) return;
+				setOverview(o);
+				setRecent(r);
+			} catch (err) {
+				if (!cancelled) toast.error(err.message || 'Failed to load dashboard');
+			} finally {
+				if (!cancelled) setLoading(false);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
-      <div className="w-full max-w-container-max mx-auto px-margin-desktop py-8 space-y-12 pb-24">
-        {/* Cinematic Hero Banner */}
-        <section className="relative w-full aspect-[21/9] rounded-xl overflow-hidden glass-surface group">
-          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/20 to-transparent z-10"></div>
-          <img
-            alt="Nano Banana 2 Hero"
-            className="absolute inset-0 w-full h-full object-cover"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDljU0USG-mJ22Z4BJm_RwS1aNOzE5Vs0o_qqYmtle6Qdh6JFYmQWFr-I0K5w7p7Xj25ekCptKL5Nf45_Wh7NF8MBBJqyQUI1B82VH1L58OqXcT-yM-Ws0CzgkXJ5R57z3Qo__60JlClPFi3laC5wLEmJ9c-kqwyD7iq6M1FYtqakD9ZfBVl5vtzv0TMkfhgjRLm1SZi4Pb6ysQKTjQvslQU0X9lWrpGoCBiRxDBroHKK4_wgN9atzuHQm4LWZ9bIV1LLWax_YUaA"
-          />
-          <div className="relative z-20 h-full flex flex-col justify-center px-12 space-y-4 max-w-2xl">
-            <span className="font-metadata text-metadata uppercase tracking-widest text-primary">Announcement</span>
-            <h1 className="font-headline-lg text-headline-lg text-white">Nano Banana 2 is here.</h1>
-            <p className="font-body-lg text-body-lg text-on-surface-variant">The next generation of temporal consistency and fluid motion is now available for all creative workspaces.</p>
-            <div className="pt-4">
-              <button className="bg-primary text-on-primary px-8 py-3 rounded-lg font-bold font-body-lg hover:brightness-110 transition-all active:scale-[0.98]">
-                Try Nano Banana 2
-              </button>
-            </div>
-          </div>
-        </section>
+	const greeting = useMemo(() => {
+		const h = new Date().getHours();
+		if (h < 5) return 'Working late';
+		if (h < 12) return 'Good morning';
+		if (h < 17) return 'Good afternoon';
+		if (h < 21) return 'Good evening';
+		return 'Working late';
+	}, []);
 
-        {/* Project Grid Section */}
-        <section className="space-y-6">
-          <div className="flex justify-between items-end">
-            <div>
-              <h2 className="font-headline-md text-headline-md text-on-surface">Recent Projects</h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">Pick up where you left off</p>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-gutter">
-            {/* New Project Card */}
-            <button 
-              onClick={() => navigate('/app/generate')}
-              className="glass-surface rounded-xl flex flex-col items-center justify-center gap-4 group hover:bg-white/5 transition-all duration-300 min-h-[280px] border-dashed border-2 border-outline-variant/30"
-            >
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-                <span className="material-symbols-outlined text-4xl" style={{ fontVariationSettings: "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24" }}>add</span>
-              </div>
-              <span className="font-headline-md text-headline-md text-primary">New Project</span>
-            </button>
+	const balance = currentUser?.credits_balance ?? 0;
+	const isEmpty = !loading && (overview?.generations?.total ?? 0) === 0;
 
-            {/* Static Project Card 1 */}
-            <div className="glass-surface rounded-xl overflow-hidden flex flex-col group cursor-pointer active:scale-[0.99] transition-all">
-              <div className="aspect-video relative overflow-hidden bg-surface-container">
-                <img
-                  alt="Project Neon"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuB23XvhgzsM8gw16twCQsbbrnj6KgrR_eBreQ3eIxk1Z1e2e63jbGs8chFt0LK1TZRxOdwtkdbofGjNbvUHtzDOGuf85mkp907lWude3c89Ml7JIqrgMckuesKhGOPhgMsYFzyMvB4wtH58i22bcD71RWoJ99tK5B-11yNPHwzoR_QTY7FxjIwie_rXuagmh6YotHoBBcjin0ZGJWXkHP0pC-y-GFtCHMmZ13Oh5Gi3fLoWgTvbhkOXfcK7em6hsPRBrwgiNx4NPg"
-                />
-                <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-metadata text-white">00:15</div>
-              </div>
-              <div className="p-4 space-y-1">
-                <h3 className="font-body-lg text-body-lg font-semibold text-on-surface">Neon Genesis Drift</h3>
-                <p className="font-metadata text-metadata text-on-surface-variant">Edited 2h ago • 4K HDR</p>
-              </div>
-            </div>
+	return (
+		<>
+			<Helmet>
+				<title>Dashboard - Aether Video</title>
+			</Helmet>
 
-            {/* Static Project Card 2 */}
-            <div className="glass-surface rounded-xl overflow-hidden flex flex-col group cursor-pointer active:scale-[0.99] transition-all">
-              <div className="aspect-video relative overflow-hidden bg-surface-container">
-                <img
-                  alt="Orbit Station"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfQdpo5AK3yLEoP-kzw2EF4nwI6wZP4bnItEjEK43X5itsrQOEWxqrZPnHNcT_EVW7K7ssd-WAjuh6A7xO2jjgREK8AG7jCMVsqKD_paql9BYSyxDFs7dwZTTDX1RgdC2C6uArAKW1KAX4QMdLqM0AgUZmUaojdfziq63QqUhVxSGOue6Y51xtK8CzxIb8a05agJNZuWRlP_gn9nZOuCjpRCsZIJwjJJTO89k3q5Se_2BoCl6N7EU3MGmkIcgW1pMbbkk2GfIZLg"
-                />
-                <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-metadata text-white">00:42</div>
-              </div>
-              <div className="p-4 space-y-1">
-                <h3 className="font-body-lg text-body-lg font-semibold text-on-surface">Orbital Descent</h3>
-                <p className="font-metadata text-metadata text-on-surface-variant">Edited 5h ago • 1080p</p>
-              </div>
-            </div>
+			<div className="flex-1 overflow-y-auto bg-black text-white">
+				<div className="max-w-6xl mx-auto px-4 sm:px-8 py-8 space-y-8">
+					{/* Hero */}
+					<motion.section
+						initial={{ opacity: 0, y: 12 }}
+						animate={{ opacity: 1, y: 0 }}
+						className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[hsl(var(--accent-primary))]/15 via-white/[0.03] to-[hsl(var(--accent-secondary))]/10 p-8 sm:p-10"
+					>
+						<div
+							aria-hidden
+							className="pointer-events-none absolute -right-24 -top-24 w-72 h-72 rounded-full opacity-50"
+							style={{
+								background:
+									'radial-gradient(circle, rgba(77,142,255,0.35) 0%, transparent 60%)',
+								filter: 'blur(40px)',
+							}}
+						/>
+						<div className="relative max-w-2xl">
+							<p className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-primary))] mb-1">
+								{greeting}
+							</p>
+							<h1 className="text-3xl sm:text-4xl font-semibold tracking-tight mb-2">
+								{currentUser?.name?.split(' ')[0] || 'there'}, ready to ship a shot?
+							</h1>
+							<p className="text-sm sm:text-base text-white/60 mb-6">
+								Type a prompt, pick a model, get a video. Your work picks up where you left off.
+							</p>
+							<div className="flex flex-wrap items-center gap-2">
+								<Link
+									to="/app/generate"
+									className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-white text-black text-sm font-medium hover:scale-[1.02] active:scale-100 transition-transform"
+								>
+									<Sparkles className="w-3.5 h-3.5" />
+									Open workspace
+								</Link>
+								<Link
+									to="/app/library"
+									className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full border border-white/15 bg-white/[0.03] text-sm font-medium hover:bg-white/[0.07] transition-colors"
+								>
+									<Play className="w-3.5 h-3.5" />
+									Browse library
+								</Link>
+							</div>
+						</div>
+					</motion.section>
 
-            {/* Static Project Card 3 */}
-            <div className="glass-surface rounded-xl overflow-hidden flex flex-col group cursor-pointer active:scale-[0.99] transition-all">
-              <div className="aspect-video relative overflow-hidden bg-surface-container">
-                <img
-                  alt="Desert Sands"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuC8Vl9QnW3q17E9FYlWgIH05UyKCHIrZXD7aCF7loZUoj0kIQ2SFkT8LeU1iYS3UQTuHKoGol1-mJdnn2cpT3SZHIieIaZU2cuIJ8lcNvm8ULj4vezRTDJt156cfXcCWMZL-y5wcoqPlN1gRk75NsNWOjGHBcZoHKnODH3IQNFZMjLNRPAnzo4zQ46XfAI1TxUbTtrqCNXwIi5e_R8THVYwlDmS11jye5c9biZeiJTiL3pa-AiopgcnQbv_u9h6WR5rvOeUSI98Vw"
-                />
-                <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-metadata text-white">00:08</div>
-              </div>
-              <div className="p-4 space-y-1">
-                <h3 className="font-body-lg text-body-lg font-semibold text-on-surface">Golden Sands Macro</h3>
-                <p className="font-metadata text-metadata text-on-surface-variant">Edited yesterday • 4K</p>
-              </div>
-            </div>
-          </div>
-        </section>
+					{/* Stats row */}
+					<section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+						<StatPill
+							icon={Coins}
+							label="Credits balance"
+							value={balance}
+							accent="bg-[hsl(var(--accent-primary))]/15 text-[hsl(var(--accent-primary))]"
+						/>
+						<StatPill
+							icon={Sparkles}
+							label="Generations"
+							value={overview?.generations?.total ?? 0}
+							hint={`${overview?.generations?.completed ?? 0} completed`}
+						/>
+						<StatPill
+							icon={BarChart3}
+							label="Success rate"
+							value={`${overview?.successRate ?? 0}%`}
+							accent="bg-emerald-500/10 text-emerald-300"
+						/>
+						<StatPill
+							icon={Wallet}
+							label="Spent this month"
+							value={overview?.credits?.monthSpent ?? 0}
+							hint="credits"
+							accent="bg-amber-500/10 text-amber-300"
+						/>
+					</section>
 
-        {/* Secondary Features Bento */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-          <div className="md:col-span-2 glass-surface rounded-xl p-8 flex flex-col justify-between min-h-[320px]">
-            <div>
-              <h2 className="font-headline-md text-headline-md text-on-surface mb-2">Refine your prompt.</h2>
-              <p className="font-body-lg text-body-lg text-on-surface-variant max-w-md">Our new prompt assistant helps you describe lighting, camera movement, and textures for the perfect shot.</p>
-            </div>
-            <div className="flex gap-4">
-              <div className="px-4 py-2 bg-white/5 rounded-lg border border-outline-variant/30 font-metadata text-metadata">Cinematic lighting</div>
-              <div className="px-4 py-2 bg-white/5 rounded-lg border border-outline-variant/30 font-metadata text-metadata">4K Texture</div>
-              <div className="px-4 py-2 bg-white/5 rounded-lg border border-outline-variant/30 font-metadata text-metadata">Handheld movement</div>
-            </div>
-          </div>
-          <div className="glass-surface rounded-xl p-8 flex flex-col items-center justify-center text-center space-y-4">
-            <div className="w-12 h-12 bg-secondary/10 text-secondary rounded-full flex items-center justify-center">
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24" }}>auto_awesome</span>
-            </div>
-            <h3 className="font-headline-md text-headline-md text-on-surface">Auto-Upscale</h3>
-            <p className="font-body-md text-body-md text-on-surface-variant">Turn 720p generations into cinematic 4K with AI enhancement.</p>
-            <button className="font-metadata text-metadata text-primary hover:underline">Learn more</button>
-          </div>
-        </section>
-      </div>
+					{/* Recent + quick actions */}
+					<section className="grid lg:grid-cols-3 gap-4">
+						<div className="lg:col-span-2">
+							<div className="flex items-end justify-between mb-3">
+								<div>
+									<h2 className="text-base font-semibold">Recent generations</h2>
+									<p className="text-xs text-white/40">Your last few projects.</p>
+								</div>
+								<Link
+									to="/app/library"
+									className="text-[11px] font-mono text-white/40 hover:text-white inline-flex items-center gap-1"
+								>
+									Library <ArrowUpRight className="w-3 h-3" />
+								</Link>
+							</div>
 
-      {/* Footer Component */}
-      <footer className="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-outline-variant/10 mt-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center py-8 px-margin-desktop w-full max-w-container-max mx-auto gap-4">
-          <div className="flex flex-col items-center md:items-start gap-1">
-            <span className="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface">Aether Video</span>
-            <p className="font-metadata text-metadata text-on-surface-variant/70">© 2024 Aether Video AI. Precision Cinematic Generation.</p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-6">
-            <a className="text-on-surface-variant/70 hover:text-on-surface font-body-md text-body-md transition-colors hover:text-primary" href="#">Documentation</a>
-            <a className="text-on-surface-variant/70 hover:text-on-surface font-body-md text-body-md transition-colors hover:text-primary" href="#">Terms of Service</a>
-            <a className="text-on-surface-variant/70 hover:text-on-surface font-body-md text-body-md transition-colors hover:text-primary" href="#">Privacy Policy</a>
-            <a className="text-on-surface-variant/70 hover:text-on-surface font-body-md text-body-md transition-colors hover:text-primary" href="#">Status</a>
-          </div>
-        </div>
-      </footer>
-    </>
-  );
+							{loading ? (
+								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+									{Array.from({ length: 3 }).map((_, i) => (
+										<div
+											key={i}
+											className="rounded-xl bg-white/[0.03] border border-white/10 overflow-hidden"
+										>
+											<div className="aspect-video bg-white/5 animate-pulse" />
+											<div className="p-3 space-y-2">
+												<div className="h-2 bg-white/10 rounded animate-pulse" />
+												<div className="h-2 bg-white/5 rounded w-2/3 animate-pulse" />
+											</div>
+										</div>
+									))}
+								</div>
+							) : isEmpty || (recent?.videos?.length ?? 0) === 0 ? (
+								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-8 text-center">
+									<Sparkles className="w-7 h-7 mx-auto text-[hsl(var(--accent-primary))] mb-3" />
+									<h3 className="text-base font-semibold mb-1">Nothing here yet</h3>
+									<p className="text-xs text-white/50 mb-4">
+										Create your first shot and it will show up here.
+									</p>
+									<Link
+										to="/app/generate"
+										className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:scale-105 transition-transform"
+									>
+										<Plus className="w-3.5 h-3.5" />
+										New generation
+									</Link>
+								</div>
+							) : (
+								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+									{recent.videos.map((v) => (
+										<Tile key={v.id} video={v} />
+									))}
+								</div>
+							)}
+						</div>
+
+						<div className="space-y-3">
+							<div>
+								<h2 className="text-base font-semibold mb-3">Activity</h2>
+							</div>
+
+							{loading ? (
+								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5">
+									<Loader2 className="w-4 h-4 animate-spin text-white/40" />
+								</div>
+							) : (recent?.transactions?.length ?? 0) === 0 ? (
+								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5">
+									<p className="text-xs text-white/40">No activity yet.</p>
+								</div>
+							) : (
+								<div className="bg-white/[0.03] border border-white/10 rounded-2xl divide-y divide-white/5 overflow-hidden">
+									{recent.transactions.slice(0, 5).map((t) => {
+										const isCharge = t.type === 'generation';
+										const sign = isCharge ? '−' : '+';
+										const cls = isCharge ? 'text-amber-300' : 'text-emerald-300';
+										return (
+											<div key={t.id} className="px-4 py-3 flex items-center gap-3">
+												<div className="flex-1 min-w-0">
+													<p className="text-xs font-medium truncate">
+														{t.description || t.type}
+													</p>
+													<p className="text-[10px] text-white/40 font-mono">
+														{timeAgo(t.created)}
+													</p>
+												</div>
+												<span className={`text-xs font-mono font-medium ${cls}`}>
+													{sign}
+													{Math.abs(t.amount || 0)}
+												</span>
+											</div>
+										);
+									})}
+								</div>
+							)}
+
+							<Link
+								to="/app/wallet"
+								className="block bg-white/[0.03] border border-white/10 rounded-2xl p-4 hover:border-white/20 transition-colors"
+							>
+								<div className="flex items-center justify-between">
+									<div>
+										<p className="text-sm font-medium">Wallet</p>
+										<p className="text-xs text-white/40">Buy credits, view receipts.</p>
+									</div>
+									<ArrowUpRight className="w-4 h-4 text-white/40" />
+								</div>
+							</Link>
+						</div>
+					</section>
+				</div>
+			</div>
+		</>
+	);
 };
 
 export default DashboardPage;
