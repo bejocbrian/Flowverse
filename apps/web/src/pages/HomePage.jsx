@@ -783,8 +783,8 @@ const FinalCTA = () => (
 /* -------------------------------------------------------------------------- */
 
 const Footer = () => (
-	<footer className="border-t border-[hsl(var(--border-subtle))] py-12 px-4 sm:px-6 lg:px-8 mt-12">
-		<div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+	<footer className="border-t border-[hsl(var(--border-subtle))] py-10 px-4 sm:px-6 lg:px-8 mt-12">
+		<div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
 			<div className="flex items-center gap-2">
 				<span className="font-semibold tracking-tight">Aether Video</span>
 				<span className="text-xs text-[hsl(var(--text-muted))] font-mono ml-2">
@@ -798,17 +798,11 @@ const Footer = () => (
 				>
 					Pricing
 				</a>
-				<Link to="/about" className="hover:text-[hsl(var(--text-primary))] transition-colors">
-					About
+				<Link to="/login" className="hover:text-[hsl(var(--text-primary))] transition-colors">
+					Sign in
 				</Link>
-				<Link
-					to="/privacy"
-					className="hover:text-[hsl(var(--text-primary))] transition-colors"
-				>
-					Privacy
-				</Link>
-				<Link to="/terms" className="hover:text-[hsl(var(--text-primary))] transition-colors">
-					Terms
+				<Link to="/signup" className="hover:text-[hsl(var(--text-primary))] transition-colors">
+					Get started
 				</Link>
 			</nav>
 		</div>

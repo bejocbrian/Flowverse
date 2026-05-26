@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -6,152 +5,125 @@ import { useAuth } from '@/contexts/AuthContext.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Label } from '@/components/ui/label.jsx';
-import { Chrome, Github } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import TurnstileWidget from '@/components/TurnstileWidget.jsx';
 
 const TURNSTILE_REQUIRED = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 const LoginPage = () => {
-  const navigate = useNavigate();
-  const { login, loginWithOAuth } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState('');
+	const navigate = useNavigate();
+	const { login } = useAuth();
+	const [email, setEmail] = useState('');
+	const [password, setPassword] = useState('');
+	const [loading, setLoading] = useState(false);
+	const [turnstileToken, setTurnstileToken] = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+	const handleSubmit = async (e) => {
+		e.preventDefault();
 
-    if (TURNSTILE_REQUIRED && !turnstileToken) {
-      toast('Please complete the captcha');
-      return;
-    }
+		if (TURNSTILE_REQUIRED && !turnstileToken) {
+			toast('Please complete the captcha');
+			return;
+		}
 
-    setLoading(true);
+		setLoading(true);
 
-    try {
-      await login(email, password, turnstileToken);
-      toast('Welcome back');
-      navigate('/app/dashboard');
-    } catch (error) {
-      toast(error.message || 'Login failed. Please check your credentials.');
-    } finally {
-      setLoading(false);
-    }
-  };
+		try {
+			await login(email, password, turnstileToken);
+			toast.success('Welcome back');
+			navigate('/app/dashboard');
+		} catch (error) {
+			toast.error(error?.message || 'Login failed. Please check your credentials.');
+		} finally {
+			setLoading(false);
+		}
+	};
 
-  return (
-    <>
-      <Helmet>
-        <title>Sign in to your account</title>
-        <meta name="description" content="Sign in to access your AI video generation workspace" />
-      </Helmet>
+	return (
+		<>
+			<Helmet>
+				<title>Sign in - Aether Video</title>
+				<meta name="description" content="Sign in to your Aether Video account" />
+			</Helmet>
 
-      <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-[hsl(var(--canvas))]">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold mb-2">Welcome back</h1>
-            <p className="text-[hsl(var(--text-secondary))]">
-              Sign in to continue creating
-            </p>
-          </div>
+			<div className="min-h-screen flex items-center justify-center px-4 py-12 bg-[hsl(var(--canvas))] gradient-hero">
+				<div className="w-full max-w-md">
+					<div className="flex items-center justify-center mb-8">
+						<Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
+							<span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] grid place-items-center">
+								<Sparkles className="w-3.5 h-3.5 text-[hsl(var(--canvas))]" />
+							</span>
+							Aether Video
+						</Link>
+					</div>
 
-          <div className="glass-surface rounded-xl p-8 shadow-glass-lg">
-            <div className="space-y-3 mb-6">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => loginWithOAuth('google')}
-              >
-                <Chrome className="w-5 h-5 mr-2" />
-                Continue with Google
-              </Button>
-              
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => loginWithOAuth('github')}
-              >
-                <Github className="w-5 h-5 mr-2" />
-                Continue with GitHub
-              </Button>
-            </div>
+					<div className="text-center mb-8">
+						<h1 className="text-3xl font-bold mb-2 tracking-tight">Welcome back</h1>
+						<p className="text-[hsl(var(--text-secondary))] text-sm">
+							Sign in to continue creating.
+						</p>
+					</div>
 
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[hsl(var(--border))]"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-[hsl(var(--surface))] text-[hsl(var(--text-secondary))]">
-                  Or continue with email
-                </span>
-              </div>
-            </div>
+					<div className="glass-elevated rounded-2xl p-7 shadow-glass-lg">
+						<form onSubmit={handleSubmit} className="space-y-4">
+							<div>
+								<Label htmlFor="email" className="text-sm">Email</Label>
+								<Input
+									id="email"
+									type="email"
+									autoComplete="email"
+									value={email}
+									onChange={(e) => setEmail(e.target.value)}
+									placeholder="you@example.com"
+									required
+									className="mt-1.5 bg-[hsl(var(--surface))] border-[hsl(var(--border))]"
+								/>
+							</div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                  className="mt-1 bg-[hsl(var(--elevated))] text-white"
-                />
-              </div>
+							<div>
+								<div className="flex items-center justify-between">
+									<Label htmlFor="password" className="text-sm">Password</Label>
+									<Link
+										to="/reset"
+										className="text-xs text-[hsl(var(--accent-primary))] hover:underline"
+									>
+										Forgot?
+									</Link>
+								</div>
+								<Input
+									id="password"
+									type="password"
+									autoComplete="current-password"
+									value={password}
+									onChange={(e) => setPassword(e.target.value)}
+									placeholder="••••••••"
+									required
+									className="mt-1.5 bg-[hsl(var(--surface))] border-[hsl(var(--border))]"
+								/>
+							</div>
 
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="mt-1 bg-[hsl(var(--elevated))] text-white"
-                />
-              </div>
+							<TurnstileWidget onToken={setTurnstileToken} className="flex justify-center pt-1" />
 
-              <div className="flex items-center justify-between text-sm">
-                <Link
-                  to="/reset"
-                  className="text-[hsl(var(--accent-primary))] hover:underline"
-                >
-                  Forgot password?
-                </Link>
-              </div>
+							<Button type="submit" className="w-full mt-2" disabled={loading}>
+								{loading ? 'Signing in...' : 'Sign in'}
+							</Button>
+						</form>
+					</div>
 
-              <TurnstileWidget onToken={setTurnstileToken} className="flex justify-center" />
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-              >
-                {loading ? 'Signing in...' : 'Sign in'}
-              </Button>
-            </form>
-
-            <p className="text-center text-sm text-[hsl(var(--text-secondary))] mt-6">
-              Don't have an account?{' '}
-              <Link
-                to="/signup"
-                className="text-[hsl(var(--accent-primary))] hover:underline font-medium"
-              >
-                Sign up
-              </Link>
-            </p>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+					<p className="text-center text-sm text-[hsl(var(--text-secondary))] mt-6">
+						Don't have an account?{' '}
+						<Link
+							to="/signup"
+							className="text-[hsl(var(--accent-primary))] hover:underline font-medium"
+						>
+							Sign up
+						</Link>
+					</p>
+				</div>
+			</div>
+		</>
+	);
 };
 
 export default LoginPage;

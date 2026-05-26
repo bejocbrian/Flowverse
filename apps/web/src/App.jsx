@@ -21,6 +21,7 @@ import SettingsPage from '@/pages/SettingsPage.jsx';
 import WalletSuccessPage from '@/pages/WalletSuccessPage.jsx';
 import WalletCancelPage from '@/pages/WalletCancelPage.jsx';
 import PublicVideoPage from '@/pages/PublicVideoPage.jsx';
+import AnalyticsPage from '@/pages/AnalyticsPage.jsx';
 
 // Admin Pages
 import AdminDashboard from '@/pages/AdminDashboard.jsx';
@@ -122,6 +123,16 @@ function App() {
             }
           />
           <Route
+            path="/app/analytics"
+            element={
+              <ProtectedRoute requiredRole="consumer">
+                <MainLayout>
+                  <AnalyticsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/app/settings"
             element={
               <ProtectedRoute requiredRole="consumer">
@@ -178,11 +189,19 @@ function App() {
           <Route
             path="*"
             element={
-              <div className="min-h-screen bg-[hsl(var(--canvas))] flex items-center justify-center">
-                <div className="text-center">
-                  <h1 className="text-4xl font-bold mb-2">404</h1>
-                  <p className="text-[hsl(var(--text-secondary))] mb-6">Page not found</p>
-                  <Link to="/" className="text-[hsl(var(--accent-primary))] hover:underline">
+              <div className="min-h-screen bg-[hsl(var(--canvas))] gradient-hero flex items-center justify-center px-4">
+                <div className="text-center max-w-md">
+                  <p className="text-label text-[hsl(var(--accent-primary))] mb-3">404</p>
+                  <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-3">
+                    Lost in the void
+                  </h1>
+                  <p className="text-[hsl(var(--text-secondary))] mb-6">
+                    The page you were looking for is not here. It may have moved or never existed.
+                  </p>
+                  <Link
+                    to="/"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[hsl(var(--accent-primary-container))] text-white font-medium hover:opacity-90 transition-opacity"
+                  >
                     Back to home
                   </Link>
                 </div>

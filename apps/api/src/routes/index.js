@@ -9,6 +9,8 @@ import stripeRouter from './stripe.js';
 import walletRouter from './wallet.js';
 import webhooksRouter from './webhooks.js';
 import settingsRouter from './settings.js';
+import modelsRouter from './models.js';
+import userAnalyticsRouter from './user-analytics.js';
 import adminProvidersRouter from './admin-providers.js';
 import adminUsersRouter from './admin-users.js';
 import adminSettingsRouter from './admin-settings.js';
@@ -29,12 +31,14 @@ export default () => {
 
 	router.use('/auth', authRouter);
 	router.use('/integrated-ai', integratedAiRouter);
+	router.use('/models', modelsRouter);
 	router.use('/videos', videosRouter);
 	router.use('/videos', videoSharingRouter);
 	router.use('/videos', videoFavoritesRouter);
 	router.use('/videos', videoRegenerateRouter);
 	router.use('/credits', creditsRouter);
 	router.use('/users', usersRouter);
+	router.use('/users/me/analytics', userAnalyticsRouter);
 	router.use('/stripe', stripeRouter);
 	router.use('/wallet', walletRouter);
 	router.use('/webhooks', webhooksRouter);
