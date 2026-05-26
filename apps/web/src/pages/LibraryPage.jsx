@@ -1,255 +1,382 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import { useAuth } from '@/contexts/AuthContext.jsx';
-import { Button } from '@/components/ui/button.jsx';
-import { Input } from '@/components/ui/input.jsx';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
-import { Play, Search, Grid3x3, LayoutGrid, Download, Share2, Trash2, Heart } from 'lucide-react';
+import { motion } from 'framer-motion';
+import {
+	Play,
+	Search,
+	Download,
+	Share2,
+	Trash2,
+	Sparkles,
+	Loader2,
+	XCircle,
+	Image as ImageIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import apiServerClient from '@/lib/apiServerClient.js';
 import pb from '@/lib/pocketbaseClient.js';
 
+const FILTER_OPTIONS = [
+	{ key: 'all', label: 'All' },
+	{ key: 'completed', label: 'Completed' },
+	{ key: 'generating', label: 'Generating' },
+	{ key: 'queued', label: 'Queued' },
+	{ key: 'failed', label: 'Failed' },
+];
+
+const SORT_OPTIONS = [
+	{ key: 'newest', label: 'Newest' },
+	{ key: 'oldest', label: 'Oldest' },
+	{ key: 'duration', label: 'Duration' },
+];
+
+/* -------------------------------------------------------------------------- */
+/*  Tile                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const VideoTile = ({ video, onDelete }) => {
+	const isImage = video.output_type === 'image';
+	const status = video.status;
+	const completed = status === 'completed' && !!video.video_url;
+	const inProgress = status === 'queued' || status === 'generating' || status === 'processing';
+	const failed = status === 'failed';
+
+	const handleDownload = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!video.video_url) return;
+		// Open in a new tab; browsers respect Content-Disposition where set,
+		// otherwise the user can save manually.
+		window.open(video.video_url, '_blank', 'noopener');
+	};
+
+	const handleShare = async (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!video.video_url) return;
+		try {
+			await navigator.clipboard.writeText(video.video_url);
+			toast.success('Link copied');
+		} catch {
+			toast.error('Could not copy link');
+		}
+	};
+
+	const handleDelete = (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		onDelete(video.id);
+	};
+
+	return (
+		<motion.div
+			layout
+			initial={{ opacity: 0, y: 10 }}
+			animate={{ opacity: 1, y: 0 }}
+			exit={{ opacity: 0, y: -10 }}
+			className="bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden group hover:border-white/20 transition-colors"
+		>
+			<Link to={`/app/library/${video.id}`} className="block relative">
+				<div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
+					{completed ? (
+						isImage ? (
+							<img
+								src={video.video_url}
+								alt={video.prompt}
+								loading="lazy"
+								className="absolute inset-0 w-full h-full object-cover"
+							/>
+						) : video.thumbnail_url ? (
+							// Image thumbnail provided by GeminiGen webhook
+							<img
+								src={video.thumbnail_url}
+								alt={video.prompt}
+								loading="lazy"
+								className="absolute inset-0 w-full h-full object-cover"
+							/>
+						) : (
+							// Fallback: render the video itself with metadata preloaded so the
+							// browser paints frame zero as the poster.
+							<video
+								src={video.video_url}
+								muted
+								playsInline
+								preload="metadata"
+								className="absolute inset-0 w-full h-full object-cover"
+							/>
+						)
+					) : inProgress ? (
+						<div className="flex flex-col items-center gap-2 text-white/60">
+							<Loader2 className="w-7 h-7 animate-spin text-[hsl(var(--accent-primary))]" />
+							<span className="text-[10px] font-mono uppercase tracking-wider">{status}…</span>
+						</div>
+					) : failed ? (
+						<div className="flex flex-col items-center gap-2 text-red-300">
+							<XCircle className="w-7 h-7" />
+							<span className="text-[10px] font-mono uppercase tracking-wider">Failed</span>
+						</div>
+					) : (
+						<Sparkles className="w-7 h-7 text-white/20" />
+					)}
+
+					{/* Hover play overlay (videos only) */}
+					{completed && !isImage && (
+						<div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-colors">
+							<Play className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+						</div>
+					)}
+
+					{/* Status badge */}
+					<span
+						className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider ${
+							completed
+								? 'bg-emerald-500/15 text-emerald-300'
+								: inProgress
+								? 'bg-blue-500/15 text-blue-300'
+								: failed
+								? 'bg-red-500/15 text-red-300'
+								: 'bg-white/10 text-white/60'
+						}`}
+					>
+						{status}
+					</span>
+
+					{/* Type badge (image vs video) */}
+					{completed && (
+						<span className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-black/60 backdrop-blur-md text-white/80">
+							{isImage ? <ImageIcon className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+							{isImage ? 'Image' : `${video.duration || 0}s`}
+						</span>
+					)}
+				</div>
+			</Link>
+
+			<div className="p-3">
+				<p className="text-sm font-medium leading-snug line-clamp-2 mb-1">{video.prompt}</p>
+				<div className="flex items-center gap-2 text-[11px] text-white/40 font-mono mb-3 truncate">
+					<span>{new Date(video.created).toLocaleDateString()}</span>
+					{video.model && (
+						<>
+							<span>·</span>
+							<span className="truncate">{video.model}</span>
+						</>
+					)}
+				</div>
+
+				<div className="flex items-center gap-1">
+					<button
+						onClick={handleDownload}
+						disabled={!completed}
+						className="p-1.5 rounded-md text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+						aria-label="Download"
+						title="Open in new tab"
+					>
+						<Download className="w-4 h-4" />
+					</button>
+					<button
+						onClick={handleShare}
+						disabled={!completed}
+						className="p-1.5 rounded-md text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+						aria-label="Copy link"
+						title="Copy link"
+					>
+						<Share2 className="w-4 h-4" />
+					</button>
+					<button
+						onClick={handleDelete}
+						className="p-1.5 rounded-md text-white/60 hover:text-red-300 hover:bg-red-500/10 transition-colors ml-auto"
+						aria-label="Delete"
+						title="Delete"
+					>
+						<Trash2 className="w-4 h-4" />
+					</button>
+				</div>
+			</div>
+		</motion.div>
+	);
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Page                                                                      */
+/* -------------------------------------------------------------------------- */
+
 const LibraryPage = () => {
-  const { currentUser } = useAuth();
-  const [videos, setVideos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('grid');
-  const [sortBy, setSortBy] = useState('newest');
-  const [filterType, setFilterType] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+	const [videos, setVideos] = useState([]);
+	const [loading, setLoading] = useState(true);
+	const [filterType, setFilterType] = useState('all');
+	const [sortBy, setSortBy] = useState('newest');
+	const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    fetchVideos();
-  }, [sortBy, filterType]);
+	const fetchVideos = async () => {
+		setLoading(true);
+		try {
+			const res = await apiServerClient.fetch('/videos?perPage=100');
+			if (!res.ok) throw new Error('Failed to load videos');
+			const data = await res.json();
+			setVideos(data.items || []);
+		} catch (err) {
+			toast.error(err.message || 'Failed to load videos');
+		} finally {
+			setLoading(false);
+		}
+	};
 
-  const fetchVideos = async () => {
-    setLoading(true);
-    try {
-      let filter = `user_id = "${currentUser.id}"`;
-      
-      if (filterType !== 'all') {
-        filter += ` && status = "${filterType}"`;
-      }
+	useEffect(() => {
+		fetchVideos();
+	}, []);
 
-      const sortField = sortBy === 'newest' ? '-created' : sortBy === 'oldest' ? 'created' : '-duration';
+	const handleDelete = async (id) => {
+		if (!window.confirm('Delete this video?')) return;
+		try {
+			// Use PB directly: the API delete endpoint isn't exposed here yet and
+			// PB enforces user-scoped delete rules.
+			await pb.collection('videos').delete(id, { $autoCancel: false });
+			setVideos((prev) => prev.filter((v) => v.id !== id));
+			toast.success('Deleted');
+		} catch {
+			toast.error('Failed to delete');
+		}
+	};
 
-      const records = await pb.collection('videos').getFullList({
-        filter,
-        sort: sortField,
-        $autoCancel: false
-      });
+	const filtered = useMemo(() => {
+		let list = videos;
+		if (filterType !== 'all') {
+			list = list.filter((v) => v.status === filterType);
+		}
+		if (search.trim()) {
+			const q = search.trim().toLowerCase();
+			list = list.filter((v) => (v.prompt || '').toLowerCase().includes(q));
+		}
+		list = [...list].sort((a, b) => {
+			if (sortBy === 'oldest') return new Date(a.created) - new Date(b.created);
+			if (sortBy === 'duration') return (b.duration || 0) - (a.duration || 0);
+			return new Date(b.created) - new Date(a.created);
+		});
+		return list;
+	}, [videos, filterType, sortBy, search]);
 
-      setVideos(records);
-    } catch (error) {
-      console.error('Failed to fetch videos:', error);
-      toast('Failed to load videos');
-    } finally {
-      setLoading(false);
-    }
-  };
+	return (
+		<>
+			<Helmet>
+				<title>Library - Aether Video</title>
+			</Helmet>
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this video?')) return;
+			<div className="flex-1 overflow-y-auto bg-black text-white">
+				<div className="max-w-7xl mx-auto px-4 sm:px-8 py-8">
+					{/* Header */}
+					<div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+						<div>
+							<p className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-primary))] mb-1">
+								Library
+							</p>
+							<h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Your videos</h1>
+							<p className="text-sm text-white/50 mt-1">
+								Everything you have generated, in one place.
+							</p>
+						</div>
+						<Link
+							to="/app/generate"
+							className="self-start sm:self-end inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:scale-105 transition-transform"
+						>
+							<Sparkles className="w-3.5 h-3.5" />
+							New
+						</Link>
+					</div>
 
-    try {
-      await pb.collection('videos').delete(id, { $autoCancel: false });
-      setVideos(videos.filter(v => v.id !== id));
-      toast('Video deleted');
-    } catch (error) {
-      toast('Failed to delete video');
-    }
-  };
+					{/* Toolbar */}
+					<div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-6">
+						<div className="relative flex-1">
+							<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+							<input
+								type="text"
+								value={search}
+								onChange={(e) => setSearch(e.target.value)}
+								placeholder="Search prompts…"
+								className="w-full pl-9 pr-3 h-10 rounded-full bg-white/[0.03] border border-white/10 text-sm placeholder:text-white/30 focus:bg-white/[0.05] focus:border-white/20 outline-none transition-colors"
+							/>
+						</div>
 
-  const filteredVideos = videos.filter(video =>
-    video.prompt.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="flex items-center gap-1 p-1 rounded-full border border-white/10 bg-white/[0.03]">
+								{FILTER_OPTIONS.map((f) => (
+									<button
+										key={f.key}
+										onClick={() => setFilterType(f.key)}
+										className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+											filterType === f.key
+												? 'bg-white text-black'
+												: 'text-white/60 hover:text-white'
+										}`}
+									>
+										{f.label}
+									</button>
+								))}
+							</div>
+							<div className="flex items-center gap-1 p-1 rounded-full border border-white/10 bg-white/[0.03]">
+								{SORT_OPTIONS.map((s) => (
+									<button
+										key={s.key}
+										onClick={() => setSortBy(s.key)}
+										className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+											sortBy === s.key
+												? 'bg-white text-black'
+												: 'text-white/60 hover:text-white'
+										}`}
+									>
+										{s.label}
+									</button>
+								))}
+							</div>
+						</div>
+					</div>
 
-  return (
-    <>
-      <Helmet>
-        <title>Library - AI Video Studio</title>
-        <meta name="description" content="Browse your generated videos" />
-      </Helmet>
-
-      <div className="min-h-screen bg-[hsl(var(--canvas))] p-8">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold">Your Videos</h1>
-            
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[hsl(var(--text-secondary))]" />
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search videos..."
-                  className="pl-10 w-64 bg-[hsl(var(--surface))] text-white"
-                />
-              </div>
-
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-40 bg-[hsl(var(--surface))] text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="oldest">Oldest</SelectItem>
-                  <SelectItem value="duration">Duration</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <div className="flex items-center gap-2 glass-surface rounded-lg p-1">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded transition-all ${
-                    viewMode === 'grid'
-                      ? 'bg-[hsl(var(--accent-primary))] text-white'
-                      : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
-                  }`}
-                >
-                  <Grid3x3 className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('masonry')}
-                  className={`p-2 rounded transition-all ${
-                    viewMode === 'masonry'
-                      ? 'bg-[hsl(var(--accent-primary))] text-white'
-                      : 'text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
-                  }`}
-                >
-                  <LayoutGrid className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 mb-8">
-            {['all', 'completed', 'generating', 'queued', 'failed'].map((type) => (
-              <button
-                key={type}
-                onClick={() => setFilterType(type)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  filterType === type
-                    ? 'bg-[hsl(var(--accent-primary))] text-white'
-                    : 'bg-[hsl(var(--surface))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]'
-                }`}
-              >
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {/* Videos Grid */}
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="glass-surface rounded-xl overflow-hidden">
-                  <div className="aspect-video bg-[hsl(var(--surface))] animate-pulse"></div>
-                  <div className="p-4 space-y-2">
-                    <div className="h-4 bg-[hsl(var(--surface))] rounded animate-pulse"></div>
-                    <div className="h-3 bg-[hsl(var(--surface))] rounded w-2/3 animate-pulse"></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : filteredVideos.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-20 h-20 rounded-full bg-[hsl(var(--surface))] flex items-center justify-center mx-auto mb-6">
-                <Play className="w-10 h-10 text-[hsl(var(--text-secondary))]" />
-              </div>
-              <h2 className="text-2xl font-bold mb-2">No videos yet</h2>
-              <p className="text-[hsl(var(--text-secondary))] mb-6">
-                Generate your first video to get started
-              </p>
-              <Link to="/app/generate">
-                <Button>Create Video</Button>
-              </Link>
-            </div>
-          ) : (
-            <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' : 'columns-1 md:columns-2 lg:columns-3 gap-6'}>
-              {filteredVideos.map((video) => (
-                <div
-                  key={video.id}
-                  className={`glass-surface rounded-xl overflow-hidden group ${viewMode === 'masonry' ? 'mb-6 break-inside-avoid' : ''}`}
-                >
-                  <Link to={`/app/library/${video.id}`} className="block relative">
-                    <div className="aspect-video bg-[hsl(var(--surface))] flex items-center justify-center">
-                      {video.status === 'completed' && video.video_url ? (
-                        video.output_type === 'image' ? (
-                          <img src={video.video_url} alt={video.prompt} className="w-full h-full object-cover" />
-                        ) : video.thumbnail_url ? (
-                          <img src={video.thumbnail_url} alt={video.prompt} className="w-full h-full object-cover" />
-                        ) : (
-                          <Play className="w-12 h-12 text-[hsl(var(--text-secondary))]" />
-                        )
-                      ) : video.status === 'generating' || video.status === 'queued' ? (
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="w-8 h-8 border-2 border-[hsl(var(--accent-primary))] border-t-transparent rounded-full animate-spin" />
-                          <span className="text-xs text-[hsl(var(--text-secondary))] capitalize">{video.status}...</span>
-                        </div>
-                      ) : video.status === 'failed' ? (
-                        <div className="flex flex-col items-center gap-2 text-[hsl(var(--error))]">
-                          <span className="material-symbols-outlined text-3xl">error</span>
-                          <span className="text-xs">Failed</span>
-                        </div>
-                      ) : (
-                        <Play className="w-12 h-12 text-[hsl(var(--text-secondary))]" />
-                      )}
-                      {video.status === 'completed' && (
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
-                          <Play className="w-12 h-12 text-white opacity-0 group-hover:opacity-100 transition-all" />
-                        </div>
-                      )}
-                      <div className="absolute top-2 left-2">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          video.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                          video.status === 'generating' ? 'bg-blue-500/20 text-blue-400' :
-                          video.status === 'queued' ? 'bg-yellow-500/20 text-yellow-400' :
-                          video.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                          'bg-white/10 text-white/50'
-                        }`}>{video.status}</span>
-                      </div>
-                      {video.duration > 0 && (
-                        <div className="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/70 backdrop-blur-sm text-xs font-mono text-white">
-                          {video.duration}s
-                        </div>
-                      )}
-                    </div>
-                  </Link>
-
-                  <div className="p-4">
-                    <h3 className="font-medium mb-1 line-clamp-1">{video.prompt.slice(0, 50)}</h3>
-                    <div className="flex items-center gap-2 text-xs text-[hsl(var(--text-secondary))] mb-3">
-                      <span className="font-mono">{new Date(video.created).toLocaleDateString()}</span>
-                      <span>•</span>
-                      <span className="px-2 py-0.5 rounded bg-[hsl(var(--surface))]">{video.model}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" className="h-8">
-                        <Download className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-8">
-                        <Share2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-8" onClick={() => handleDelete(video.id)}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-8 ml-auto">
-                        <Heart className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
+					{/* Grid */}
+					{loading ? (
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+							{Array.from({ length: 8 }).map((_, i) => (
+								<div
+									key={i}
+									className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden"
+								>
+									<div className="aspect-video bg-white/5 animate-pulse" />
+									<div className="p-3 space-y-2">
+										<div className="h-3 bg-white/10 rounded animate-pulse" />
+										<div className="h-3 bg-white/5 rounded w-2/3 animate-pulse" />
+									</div>
+								</div>
+							))}
+						</div>
+					) : filtered.length === 0 ? (
+						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+							<Sparkles className="w-8 h-8 mx-auto text-[hsl(var(--accent-primary))] mb-3" />
+							<h2 className="text-lg font-semibold mb-1">
+								{videos.length === 0 ? 'No videos yet' : 'Nothing matches that filter'}
+							</h2>
+							<p className="text-sm text-white/50 mb-5">
+								{videos.length === 0
+									? 'Generate your first video to fill this up.'
+									: 'Try a different status or clear your search.'}
+							</p>
+							<Link
+								to="/app/generate"
+								className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:scale-105 transition-transform"
+							>
+								<Sparkles className="w-3.5 h-3.5" />
+								Create your first video
+							</Link>
+						</div>
+					) : (
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+							{filtered.map((v) => (
+								<VideoTile key={v.id} video={v} onDelete={handleDelete} />
+							))}
+						</div>
+					)}
+				</div>
+			</div>
+		</>
+	);
 };
 
 export default LibraryPage;

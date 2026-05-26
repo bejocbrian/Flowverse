@@ -263,12 +263,15 @@ export async function generateImage({
  * Fetch generation history/status from GeminiGen API (polling fallback).
  * GET /history/{conversion_uuid}
  *
- * Response shape:
- * {
- *   id, uuid, status (1/2/3), status_desc, error_message,
- *   generated_video: [{ video_url, aspect_ratio }],
- *   generated_image: [{ image_url }]
- * }
+ * Per GeminiGen docs the response shape includes:
+ *   { id, uuid, status (1/2/3), status_desc, error_message,
+ *     media_url, thumbnail_url,
+ *     generated_video: [{ video_url, aspect_ratio }],
+ *     generated_image: [{ image_url }] }
+ *
+ * `media_url` and `thumbnail_url` are the canonical fields once a generation
+ * completes. The legacy `generated_video` / `generated_image` arrays are used
+ * as fallbacks.
  *
  * @param {string} uuid - The generation request UUID
  * @returns {Promise<Object>}
@@ -283,13 +286,22 @@ export async function getGenerationStatus(uuid) {
 
 	const data = await response.json();
 
+	const mediaUrl =
+		data.media_url ||
+		data.generated_video?.[0]?.video_url ||
+		data.generated_image?.[0]?.image_url ||
+		null;
+
 	return {
 		uuid: data.uuid,
 		status: data.status,
 		status_desc: data.status_desc,
 		error_message: data.error_message,
-		video_url: data.generated_video?.[0]?.video_url || null,
-		image_url: data.generated_image?.[0]?.image_url || null,
+		media_url: mediaUrl,
+		thumbnail_url: data.thumbnail_url || null,
+		// keep these for backwards compatibility with any caller still using them
+		video_url: data.generated_video?.[0]?.video_url || mediaUrl || null,
+		image_url: data.generated_image?.[0]?.image_url || (data.media_type === 'image' ? mediaUrl : null),
 		raw: data,
 	};
 }

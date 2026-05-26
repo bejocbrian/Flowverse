@@ -1,3 +1,31 @@
+/**
+ * GeminiGen webhook handler.
+ *
+ * Reference (https://docs.geminigen.ai / https://ainnate-geminigen.github.io/GEMINIGEN.AI-API-DEMO):
+ *
+ *   {
+ *     "event_name": "VIDEO_GENERATION_COMPLETED",
+ *     "event_uuid": "<uuid for this delivery>",
+ *     "data": {
+ *       "uuid":            "<request uuid - matches our external_id>",
+ *       "model_name":      "veo-2",
+ *       "input_text":      "Dog is running",
+ *       "used_credit":     60000,
+ *       "status":          2,
+ *       "status_percentage": 100,
+ *       "error_message":   "",
+ *       "media_url":       "https://....mp4",
+ *       "thumbnail_url":   "https://cdn.geminigen.ai/.../uuid_0_200px.jpg",
+ *       "created_at":      "...",
+ *       "updated_at":      "..."
+ *     }
+ *   }
+ *
+ * Image webhooks omit `thumbnail_url` and use `media_url` for the image itself.
+ *
+ * Older field names (event/event_type, request_id, video_url, image_url) are
+ * accepted as fallbacks in case the upstream sends a slightly different shape.
+ */
 import { Router } from 'express';
 import { createHash, createVerify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -6,272 +34,233 @@ import logger from '../utils/logger.js';
 
 const router = Router();
 
-// POST /webhooks/geminigen - Receive GeminiGen webhook callbacks
+const VIDEO_COMPLETED_EVENTS = new Set([
+	'VIDEO_GENERATION_COMPLETED',
+	'video.generated',
+	'video.completed',
+]);
+const VIDEO_FAILED_EVENTS = new Set([
+	'VIDEO_GENERATION_FAILED',
+	'video.failed',
+]);
+const IMAGE_COMPLETED_EVENTS = new Set([
+	'IMAGE_GENERATION_COMPLETED',
+	'image.generated',
+	'image.completed',
+]);
+const IMAGE_FAILED_EVENTS = new Set([
+	'IMAGE_GENERATION_FAILED',
+	'image.failed',
+]);
+
 router.post('/geminigen', async (req, res) => {
 	try {
+		const body = req.body || {};
+		const event = body.event_name || body.event || body.event_type;
+		const data = body.data || body.payload || body;
+		// data.uuid is the request UUID we stored as external_id at submit time.
+		const requestUuid = data?.uuid || body.request_id || body.uuid || data?.id;
+		// event_uuid is the per-delivery UUID we sign against.
+		const eventUuid = body.event_uuid || requestUuid;
 		const signature = req.headers['x-signature'];
-		const eventUuid = req.body?.uuid || req.body?.data?.id;
 
-		// Optionally verify signature if public key is configured
 		if (process.env.GEMINIGEN_WEBHOOK_PUBLIC_KEY_PATH && signature && eventUuid) {
 			try {
-				const isValid = verifySignature(eventUuid, signature);
-				if (!isValid) {
+				if (!verifySignature(eventUuid, signature)) {
 					logger.warn('Webhook signature verification failed');
 					return res.status(401).json({ error: 'Invalid signature' });
 				}
 			} catch (verifyError) {
 				logger.warn('Webhook signature verification error:', verifyError.message);
-				// Continue processing if verification fails due to missing key file
+				// fall through and process - signing is best-effort when no key is provisioned
 			}
 		}
 
-		const event = req.body.event || req.body.event_type;
-		const data = req.body.data || req.body.payload || req.body;
-		const uuid = req.body.uuid || req.body.request_id || req.body.id || data?.id;
-
-		if (!event || !uuid) {
+		if (!event || !requestUuid) {
 			return res.status(400).json({ error: 'Missing event or uuid' });
 		}
 
-		logger.info(`GeminiGen webhook received: ${event} (${uuid})`);
+		logger.info(`GeminiGen webhook: ${event} request=${requestUuid}`);
 
-		switch (event) {
-			case 'VIDEO_GENERATION_COMPLETED':
-			case 'video.generated':
-			case 'video.completed':
-				await handleVideoCompleted(data, uuid);
-				break;
-			case 'VIDEO_GENERATION_FAILED':
-			case 'video.failed':
-				await handleVideoFailed(data, uuid);
-				break;
-			case 'IMAGE_GENERATION_COMPLETED':
-			case 'image.generated':
-			case 'image.completed':
-				await handleImageCompleted(data, uuid);
-				break;
-			case 'IMAGE_GENERATION_FAILED':
-			case 'image.failed':
-				await handleImageFailed(data, uuid);
-				break;
-			default:
-				logger.warn(`Unknown webhook event: ${event}`);
+		if (VIDEO_COMPLETED_EVENTS.has(event)) {
+			await handleVideoCompleted(data, requestUuid);
+		} else if (VIDEO_FAILED_EVENTS.has(event)) {
+			await handleVideoFailed(data, requestUuid);
+		} else if (IMAGE_COMPLETED_EVENTS.has(event)) {
+			await handleImageCompleted(data, requestUuid);
+		} else if (IMAGE_FAILED_EVENTS.has(event)) {
+			await handleImageFailed(data, requestUuid);
+		} else {
+			logger.warn(`Unhandled webhook event: ${event}`);
 		}
 
+		// Always 200. We don't want GeminiGen retrying delivery if our processing
+		// errors - we have polling fallback for that.
 		res.status(200).json({ received: true });
 	} catch (error) {
 		logger.error('Webhook processing error:', error.message);
-		// Still return 200 to prevent retries for processing errors
 		res.status(200).json({ received: true, error: error.message });
 	}
 });
 
-/**
- * Handle completed video generation webhook
- */
+/* -------------------------------------------------------------------------- */
+/*  Helpers                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Find the video record we created when the user first submitted. */
+async function findByExternalId(uuid) {
+	const list = await pb.collection('videos').getList(1, 1, {
+		filter: `external_id = "${uuid}"`,
+	});
+	return list.items[0] || null;
+}
+
+function pickMediaUrl(data) {
+	return (
+		data?.media_url ||
+		data?.video_url ||
+		data?.image_url ||
+		data?.url ||
+		data?.output_url ||
+		''
+	);
+}
+
+function pickThumbnailUrl(data) {
+	return data?.thumbnail_url || data?.thumb_url || '';
+}
+
+async function refundCredits(video, reason) {
+	try {
+		const user = await pb.collection('users').getOne(video.user_id);
+		const refund = video.credit_cost || 0;
+		const newBalance = (user.credits_balance || 0) + refund;
+		await pb.collection('users').update(video.user_id, {
+			credits_balance: newBalance,
+		});
+		await pb.collection('transactions').create({
+			user_id: video.user_id,
+			type: 'refund',
+			amount: refund,
+			balance_after: newBalance,
+			description: reason,
+			video_id: video.id,
+		});
+		logger.info(`Credits refunded (${refund}) for video ${video.id}`);
+	} catch (refundError) {
+		logger.error('Credit refund error:', refundError.message);
+	}
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Video handlers                                                            */
+/* -------------------------------------------------------------------------- */
+
 async function handleVideoCompleted(data, uuid) {
-	try {
-		// Find the video record by external_id (the GeminiGen request ID)
-		const videos = await pb.collection('videos').getList(1, 1, {
-			filter: `external_id = "${uuid}"`,
-		});
-
-		if (videos.items.length === 0) {
-			logger.warn(`No video found for webhook uuid: ${uuid}`);
-			return;
-		}
-
-		const video = videos.items[0];
-
-		// IDEMPOTENCY CHECK: Skip if already completed
-		if (video.status === 'completed') {
-			logger.info(`Video already completed, skipping webhook: ${video.id}`);
-			return;
-		}
-
-		await pb.collection('videos').update(video.id, {
-			status: 'completed',
-			video_url: data?.video_url || data?.url || data?.output_url || '',
-			completed_at: new Date().toISOString(),
-			webhook_data: JSON.stringify(data),
-		});
-
-		logger.info(`Video generation completed: ${video.id}`);
-	} catch (error) {
-		logger.error('Handle video completed error:', error.message);
-		throw error;
+	const video = await findByExternalId(uuid);
+	if (!video) {
+		logger.warn(`No video record for webhook uuid: ${uuid}`);
+		return;
 	}
+	if (video.status === 'completed') {
+		logger.info(`Video ${video.id} already completed, skipping webhook`);
+		return;
+	}
+
+	await pb.collection('videos').update(video.id, {
+		status: 'completed',
+		video_url: pickMediaUrl(data),
+		thumbnail_url: pickThumbnailUrl(data),
+		completed_at: new Date().toISOString(),
+		webhook_data: JSON.stringify(data),
+	});
+
+	logger.info(`Video completed: ${video.id}`);
 }
 
-/**
- * Handle failed video generation webhook
- */
 async function handleVideoFailed(data, uuid) {
-	try {
-		const videos = await pb.collection('videos').getList(1, 1, {
-			filter: `external_id = "${uuid}"`,
-		});
-
-		if (videos.items.length === 0) {
-			logger.warn(`No video found for webhook uuid: ${uuid}`);
-			return;
-		}
-
-		const video = videos.items[0];
-
-		// IDEMPOTENCY CHECK: Skip if already failed or completed
-		if (video.status === 'failed' || video.status === 'completed') {
-			logger.info(`Video already ${video.status}, skipping webhook: ${video.id}`);
-			return;
-		}
-
-		await pb.collection('videos').update(video.id, {
-			status: 'failed',
-			error_message: data?.error || data?.message || 'Generation failed',
-			webhook_data: JSON.stringify(data),
-		});
-
-		// Refund credits on failure
-		try {
-			const user = await pb.collection('users').getOne(video.user_id);
-			const newBalance = user.credits_balance + (video.credit_cost || 0);
-			await pb.collection('users').update(video.user_id, {
-				credits_balance: newBalance,
-			});
-
-			await pb.collection('transactions').create({
-				user_id: video.user_id,
-				type: 'refund',
-				amount: video.credit_cost || 0,
-				balance_after: newBalance,
-				description: `Refund: Video generation failed`,
-				video_id: video.id,
-			});
-
-			logger.info(`Credits refunded for failed video: ${video.id}`);
-		} catch (refundError) {
-			logger.error('Credit refund error:', refundError.message);
-		}
-
-		logger.info(`Video generation failed: ${video.id}`);
-	} catch (error) {
-		logger.error('Handle video failed error:', error.message);
-		throw error;
+	const video = await findByExternalId(uuid);
+	if (!video) {
+		logger.warn(`No video record for webhook uuid: ${uuid}`);
+		return;
 	}
+	if (video.status === 'failed' || video.status === 'completed') {
+		logger.info(`Video ${video.id} already ${video.status}, skipping webhook`);
+		return;
+	}
+
+	await pb.collection('videos').update(video.id, {
+		status: 'failed',
+		error_message: data?.error_message || data?.error || data?.message || 'Generation failed',
+		webhook_data: JSON.stringify(data),
+	});
+
+	await refundCredits(video, 'Refund: Video generation failed');
+	logger.info(`Video failed: ${video.id}`);
 }
 
-/**
- * Handle completed image generation webhook
- */
+/* -------------------------------------------------------------------------- */
+/*  Image handlers                                                            */
+/* -------------------------------------------------------------------------- */
+
 async function handleImageCompleted(data, uuid) {
-	try {
-		const videos = await pb.collection('videos').getList(1, 1, {
-			filter: `external_id = "${uuid}"`,
-		});
-
-		if (videos.items.length === 0) {
-			logger.warn(`No generation record found for webhook uuid: ${uuid}`);
-			return;
-		}
-
-		const record = videos.items[0];
-
-		// IDEMPOTENCY CHECK: Skip if already completed
-		if (record.status === 'completed') {
-			logger.info(`Image already completed, skipping webhook: ${record.id}`);
-			return;
-		}
-
-		await pb.collection('videos').update(record.id, {
-			status: 'completed',
-			video_url: data?.image_url || data?.url || data?.output_url || '',
-			completed_at: new Date().toISOString(),
-			webhook_data: JSON.stringify(data),
-		});
-
-		logger.info(`Image generation completed: ${record.id}`);
-	} catch (error) {
-		logger.error('Handle image completed error:', error.message);
-		throw error;
+	const record = await findByExternalId(uuid);
+	if (!record) {
+		logger.warn(`No record for image webhook uuid: ${uuid}`);
+		return;
 	}
+	if (record.status === 'completed') {
+		logger.info(`Image ${record.id} already completed, skipping`);
+		return;
+	}
+
+	await pb.collection('videos').update(record.id, {
+		status: 'completed',
+		video_url: pickMediaUrl(data),
+		// For images, the media URL serves as both source and thumbnail.
+		thumbnail_url: pickThumbnailUrl(data) || pickMediaUrl(data),
+		completed_at: new Date().toISOString(),
+		webhook_data: JSON.stringify(data),
+	});
+
+	logger.info(`Image completed: ${record.id}`);
 }
 
-/**
- * Handle failed image generation webhook
- */
 async function handleImageFailed(data, uuid) {
-	try {
-		const videos = await pb.collection('videos').getList(1, 1, {
-			filter: `external_id = "${uuid}"`,
-		});
-
-		if (videos.items.length === 0) {
-			logger.warn(`No generation record found for webhook uuid: ${uuid}`);
-			return;
-		}
-
-		const record = videos.items[0];
-
-		// IDEMPOTENCY CHECK: Skip if already failed or completed
-		if (record.status === 'failed' || record.status === 'completed') {
-			logger.info(`Image already ${record.status}, skipping webhook: ${record.id}`);
-			return;
-		}
-
-		await pb.collection('videos').update(record.id, {
-			status: 'failed',
-			error_message: data?.error || data?.message || 'Image generation failed',
-			webhook_data: JSON.stringify(data),
-		});
-
-		// Refund credits on failure
-		try {
-			const user = await pb.collection('users').getOne(record.user_id);
-			const newBalance = user.credits_balance + (record.credit_cost || 0);
-			await pb.collection('users').update(record.user_id, {
-				credits_balance: newBalance,
-			});
-
-			await pb.collection('transactions').create({
-				user_id: record.user_id,
-				type: 'refund',
-				amount: record.credit_cost || 0,
-				balance_after: newBalance,
-				description: `Refund: Image generation failed`,
-				video_id: record.id,
-			});
-
-			logger.info(`Credits refunded for failed image: ${record.id}`);
-		} catch (refundError) {
-			logger.error('Credit refund error:', refundError.message);
-		}
-
-		logger.info(`Image generation failed: ${record.id}`);
-	} catch (error) {
-		logger.error('Handle image failed error:', error.message);
-		throw error;
+	const record = await findByExternalId(uuid);
+	if (!record) {
+		logger.warn(`No record for image webhook uuid: ${uuid}`);
+		return;
 	}
+	if (record.status === 'failed' || record.status === 'completed') {
+		logger.info(`Image ${record.id} already ${record.status}, skipping`);
+		return;
+	}
+
+	await pb.collection('videos').update(record.id, {
+		status: 'failed',
+		error_message: data?.error_message || data?.error || data?.message || 'Image generation failed',
+		webhook_data: JSON.stringify(data),
+	});
+
+	await refundCredits(record, 'Refund: Image generation failed');
+	logger.info(`Image failed: ${record.id}`);
 }
 
-/**
- * Verify GeminiGen webhook signature (HMAC-SHA256 with public key)
- */
+/* -------------------------------------------------------------------------- */
+/*  Signature verification                                                    */
+/* -------------------------------------------------------------------------- */
+
 function verifySignature(eventUuid, signature) {
 	try {
 		const publicKeyPath = process.env.GEMINIGEN_WEBHOOK_PUBLIC_KEY_PATH;
-		if (!publicKeyPath) {
-			return true; // Skip verification if no key configured
-		}
+		if (!publicKeyPath) return true;
 
 		const publicKey = readFileSync(publicKeyPath, 'utf-8');
+		const md5Digest = createHash('md5').update(eventUuid, 'utf8').digest();
 
-		// Create MD5 hash of the event UUID
-		const md5Hash = createHash('md5').update(eventUuid).digest();
-
-		// Verify the signature using RSA-SHA256 with PKCS1v15 padding
 		const verify = createVerify('RSA-SHA256');
-		verify.update(md5Hash);
+		verify.update(md5Digest);
 		verify.end();
 
 		return verify.verify(publicKey, Buffer.from(signature, 'hex'));

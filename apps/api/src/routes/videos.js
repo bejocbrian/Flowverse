@@ -54,6 +54,7 @@ router.get('/', async (req, res) => {
 				provider: video.provider,
 				model: video.model,
 				video_url: video.video_url,
+				thumbnail_url: video.thumbnail_url,
 				output_type: video.output_type || 'video',
 				error_message: video.error_message,
 				created: video.created,
@@ -237,6 +238,7 @@ router.get('/:id', async (req, res) => {
 				provider: video.provider,
 				model: video.model,
 				video_url: video.video_url,
+				thumbnail_url: video.thumbnail_url,
 				output_type: video.output_type || 'video',
 				credit_cost: video.credit_cost,
 				error_message: video.error_message,
@@ -249,6 +251,7 @@ router.get('/:id', async (req, res) => {
 				prompt: v.prompt,
 				status: v.status,
 				video_url: v.video_url,
+				thumbnail_url: v.thumbnail_url,
 				output_type: v.output_type || 'video',
 				created: v.created,
 			})),
@@ -283,12 +286,15 @@ router.get('/:id/status', async (req, res) => {
 				if (genStatus.status === GeminiGenStatus.COMPLETED) {
 					const isImage = video.output_type === 'image';
 					const mediaUrl = isImage
-						? (genStatus.image_url || genStatus.video_url)
-						: (genStatus.video_url || genStatus.image_url);
+						? (genStatus.image_url || genStatus.media_url || genStatus.video_url)
+						: (genStatus.video_url || genStatus.media_url || genStatus.image_url);
+					// For images, fall back to the media url for the thumbnail.
+					const thumbnailUrl = genStatus.thumbnail_url || (isImage ? mediaUrl : '');
 
 					await pb.collection('videos').update(id, {
 						status: 'completed',
 						video_url: mediaUrl || '',
+						thumbnail_url: thumbnailUrl || '',
 						completed_at: new Date().toISOString(),
 						webhook_data: JSON.stringify(genStatus.raw),
 					});
@@ -326,6 +332,7 @@ router.get('/:id/status', async (req, res) => {
 			id: video.id,
 			status: video.status,
 			video_url: video.video_url,
+			thumbnail_url: video.thumbnail_url,
 			error_message: video.error_message,
 			output_type: video.output_type || 'video',
 		});

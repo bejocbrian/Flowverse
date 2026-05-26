@@ -360,7 +360,12 @@ const GeneratePage = () => {
 
 			if (!response.ok) {
 				const errData = await response.json().catch(() => ({}));
-				throw new Error(errData.error || 'Generation failed');
+				const msg =
+					(typeof errData.error === 'string' && errData.error) ||
+					(typeof errData.message === 'string' && errData.message) ||
+					(typeof errData.detail === 'string' && errData.detail) ||
+					`Generation failed (HTTP ${response.status})`;
+				throw new Error(msg);
 			}
 
 			const data = await response.json();
@@ -377,7 +382,13 @@ const GeneratePage = () => {
 			setLoading(false);
 			setProgress(0);
 			setStage(0);
-			toast.error(error.message);
+			const message =
+				typeof error?.message === 'string'
+					? error.message
+					: typeof error === 'string'
+					? error
+					: 'Generation failed';
+			toast.error(message);
 		}
 	}, [canSubmit, selectedModel, prompt, aspectRatio, duration, resolution, startPolling, stopPolling]);
 
