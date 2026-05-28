@@ -1,6 +1,18 @@
-import pb from '../utils/pocketbaseClient.js';
+import { Buffer } from 'node:buffer';
+import Pocketbase from 'pocketbase';
 import logger from '../utils/logger.js';
 
+const POCKETBASE_HOST = process.env.POCKETBASE_URL || 'http://localhost:8090';
+
+/**
+ * Verifies the requester is an authenticated admin.
+ *
+ * The frontend wraps its `pocketbase_auth` localStorage entry in base64
+ * (see apps/web/src/lib/apiServerClient.js). We must decode the wrapper
+ * the same way `pocketbase-auth.js` does, then verify the auth token
+ * against PocketBase using a *fresh* client per request so we never
+ * mutate global auth state.
+ */
 export const adminRoleCheck = async (req, res, next) => {
 	const authHeader = req.headers.authorization;
 
@@ -8,21 +20,40 @@ export const adminRoleCheck = async (req, res, next) => {
 		return res.status(401).json({ error: 'Authorization header required' });
 	}
 
+	const wrappedToken = authHeader.split(' ')[1];
+	if (!wrappedToken) {
+		return res.status(401).json({ error: 'Invalid authorization format' });
+	}
+
 	try {
-		const token = authHeader.split(' ')[1];
-		if (!token) {
-			return res.status(401).json({ error: 'Invalid authorization format' });
+		const decoded = Buffer.from(wrappedToken, 'base64').toString('utf-8');
+		const tokenData = JSON.parse(decoded);
+
+		const record = tokenData?.model || tokenData?.record;
+		if (!record || !tokenData?.token) {
+			return res.status(401).json({ error: 'Invalid token' });
 		}
 
-		// Set auth token and verify
-		pb.authStore.save(token);
-		const authData = await pb.collection('users').authRefresh();
+		const collectionName = record.collectionName || 'users';
 
-		if (!authData.record.role || authData.record.role !== 'admin') {
+		// Fresh client per request: never share auth state across users.
+		const pbForRequest = new Pocketbase(POCKETBASE_HOST);
+		pbForRequest.authStore.save(tokenData.token, record);
+
+		const refreshed = await pbForRequest
+			.collection(collectionName)
+			.authRefresh();
+
+		if (!refreshed.record.role || refreshed.record.role !== 'admin') {
 			return res.status(403).json({ error: 'Admin access required' });
 		}
 
-		req.pocketbaseUserId = authData.record.id;
+		if (refreshed.record.banned_at) {
+			return res.status(403).json({ error: 'Account is banned' });
+		}
+
+		req.pocketbaseUserId = refreshed.record.id;
+		req.pocketbaseUser = refreshed.record;
 		next();
 	} catch (error) {
 		logger.error('Admin role check error:', error.message);

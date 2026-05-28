@@ -172,6 +172,17 @@ router.post('/login', loginLimiter, async (req, res) => {
 	try {
 		const authData = await pb.collection('users').authWithPassword(email, password);
 
+		// Reject banned users. We check after authWithPassword so that the
+		// timing of "wrong password" vs "banned" is identical: both come
+		// after the password check has run.
+		if (authData.record.banned_at) {
+			logger.warn(`Banned user attempted login: ${authData.record.id}`);
+			return res.status(403).json({
+				success: false,
+				error: 'This account has been suspended.',
+			});
+		}
+
 		return res.json({
 			success: true,
 			user: {

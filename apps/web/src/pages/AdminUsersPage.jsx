@@ -4,7 +4,6 @@ import { Helmet } from 'react-helmet';
 import { Input } from '@/components/ui/input.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog.jsx';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { Checkbox } from '@/components/ui/checkbox.jsx';
 import { Search, MoreVertical, ShieldAlert, Coins, Trash2, User as UserIcon } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.jsx';
@@ -68,6 +67,25 @@ const AdminUsersPage = () => {
     } catch (error) {
       toast(`Failed to ${action} user`);
     }
+  };
+
+  const handleBulkBan = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Ban ${selectedIds.size} selected user${selectedIds.size === 1 ? '' : 's'}?`)) return;
+
+    const ids = Array.from(selectedIds);
+    const results = await Promise.allSettled(
+      ids.map((id) => apiServerClient.fetch(`/admin/users/${id}/ban`, { method: 'POST' })),
+    );
+    const failed = results.filter((r) => r.status === 'rejected' || (r.value && !r.value.ok)).length;
+
+    if (failed === 0) {
+      toast(`Banned ${ids.length} user${ids.length === 1 ? '' : 's'}`);
+    } else {
+      toast(`Banned ${ids.length - failed} of ${ids.length}; ${failed} failed`);
+    }
+    setSelectedIds(new Set());
+    fetchUsers();
   };
 
   const submitCredits = async () => {
@@ -156,7 +174,7 @@ const AdminUsersPage = () => {
             <div className="bg-[hsl(var(--accent-primary))]/10 border-b border-[hsl(var(--admin-border))] px-6 py-3 flex items-center justify-between">
               <span className="text-sm font-medium text-[hsl(var(--accent-primary))]">{selectedIds.size} users selected</span>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="border-red-500/20 text-red-500 hover:bg-red-500/10">Bulk Ban</Button>
+                <Button size="sm" variant="outline" onClick={handleBulkBan} className="border-red-500/20 text-red-500 hover:bg-red-500/10">Bulk Ban</Button>
               </div>
             </div>
           )}

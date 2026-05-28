@@ -16,57 +16,61 @@ const adminRateLimit = rateLimit({
 router.use(adminRateLimit);
 router.use(adminRoleCheck);
 
-// GET /admin/users - Get paginated users with filters
+function publicUser(u) {
+	return {
+		id: u.id,
+		email: u.email,
+		name: u.name,
+		role: u.role,
+		credits_balance: u.credits_balance ?? 0,
+		banned_at: u.banned_at || null,
+		created: u.created,
+		updated: u.updated,
+	};
+}
+
+// Escape any character that has meaning in PocketBase filter strings.
+function escapeFilter(value) {
+	return String(value).replace(/["\\]/g, (m) => `\\${m}`);
+}
+
+// GET /admin/users - Paginated users with filters
 router.get('/', async (req, res) => {
-	const { page = 1, limit = 25, search, filter } = req.query;
-	const pageNum = parseInt(page) || 1;
-	const limitNum = parseInt(limit) || 25;
+	const pageNum = Math.max(parseInt(req.query.page, 10) || 1, 1);
+	const limitNum = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+	const search = (req.query.search || '').trim();
+	const filter = (req.query.filter || 'All').trim();
 
 	try {
-		let filterStr = '';
+		const conditions = [];
 
 		if (search) {
-			const searchTerm = search.toLowerCase();
-			filterStr = `(email ~ "${searchTerm}" || name ~ "${searchTerm}")`;
+			const safe = escapeFilter(search);
+			conditions.push(`(email ~ "${safe}" || name ~ "${safe}")`);
 		}
 
-		if (filter) {
-			const filterConditions = [];
-			if (filter === 'Active') {
-				filterConditions.push('banned_at = null');
-			} else if (filter === 'Banned') {
-				filterConditions.push('banned_at != null');
-			} else if (['Free', 'Pro', 'Studio'].includes(filter)) {
-				filterConditions.push(`plan = "${filter}"`);
-			}
-
-			if (filterConditions.length > 0) {
-				const planFilter = filterConditions.join(' && ');
-				filterStr = filterStr ? `${filterStr} && ${planFilter}` : planFilter;
-			}
+		if (filter === 'Active') {
+			conditions.push('banned_at = null');
+		} else if (filter === 'Banned') {
+			conditions.push('banned_at != null');
 		}
+		// Note: there is intentionally no plan/tier filter here. The users
+		// collection has no `plan` field. If/when one is added, restore it.
 
-		const users = await pb.collection('users').getList(pageNum, limitNum, {
-			filter: filterStr || undefined,
+		const filterStr = conditions.length ? conditions.join(' && ') : undefined;
+
+		const result = await pb.collection('users').getList(pageNum, limitNum, {
+			filter: filterStr,
 			sort: '-created',
 		});
 
 		logger.info(`Fetched users page ${pageNum}`);
 
 		res.json({
-			users: users.items.map(user => ({
-				id: user.id,
-				email: user.email,
-				name: user.name,
-				plan: user.plan || 'Free',
-				credits_balance: user.credits_balance,
-				banned_at: user.banned_at,
-				created: user.created,
-				updated: user.updated,
-			})),
-			totalItems: users.totalItems,
-			totalPages: users.totalPages,
-			currentPage: users.page,
+			users: result.items.map(publicUser),
+			totalItems: result.totalItems,
+			totalPages: result.totalPages,
+			currentPage: result.page,
 		});
 	} catch (error) {
 		logger.error('Fetch users error:', error.message);
@@ -74,22 +78,23 @@ router.get('/', async (req, res) => {
 	}
 });
 
-// POST /admin/users/:id/credits - Add/deduct credits
+// POST /admin/users/:id/credits - Add or deduct credits
 router.post('/:id/credits', async (req, res) => {
 	const { id } = req.params;
-	const { amount, reason } = req.body;
+	const { amount, reason } = req.body || {};
 
-	if (!amount || typeof amount !== 'number') {
-		return res.status(400).json({ error: 'amount is required and must be a number' });
+	if (typeof amount !== 'number' || !Number.isFinite(amount) || amount === 0) {
+		return res.status(400).json({ error: 'amount must be a non-zero number' });
 	}
 
-	if (!reason) {
+	if (!reason || typeof reason !== 'string' || !reason.trim()) {
 		return res.status(400).json({ error: 'reason is required' });
 	}
 
 	try {
 		const user = await pb.collection('users').getOne(id);
-		const newBalance = user.credits_balance + amount;
+		const currentBalance = user.credits_balance ?? 0;
+		const newBalance = currentBalance + amount;
 
 		if (newBalance < 0) {
 			return res.status(400).json({ error: 'Insufficient credits' });
@@ -99,100 +104,83 @@ router.post('/:id/credits', async (req, res) => {
 			credits_balance: newBalance,
 		});
 
-		// Create transaction record
-		await pb.collection('transactions').create({
-			user_id: id,
-			type: amount > 0 ? 'credit' : 'debit',
-			amount: Math.abs(amount),
-			description: `Admin adjustment: ${reason}`,
-		});
+		// `transactions.type` only allows: purchase | generation | refund.
+		// Admin grants map to `purchase`; admin debits map to `refund` (negative
+		// amount), which keeps the audit trail consistent with the schema.
+		const txType = amount > 0 ? 'purchase' : 'refund';
 
-		logger.info(`Credits adjusted for user ${id}: ${amount}`);
+		try {
+			await pb.collection('transactions').create({
+				user_id: id,
+				type: txType,
+				amount,
+				balance_after: newBalance,
+			});
+		} catch (txError) {
+			// Don't roll back the credit change just because the audit row
+			// failed - log loudly so it can be investigated.
+			logger.error(
+				`Credits adjusted but transaction record failed for user ${id}: ${txError.message}`,
+			);
+		}
 
-		res.json({
-			user: {
-				id: updatedUser.id,
-				email: updatedUser.email,
-				name: updatedUser.name,
-				credits_balance: updatedUser.credits_balance,
-			},
-		});
+		logger.info(
+			`Credits adjusted for user ${id}: ${amount} (reason: ${reason.trim()})`,
+		);
+
+		res.json({ user: publicUser(updatedUser) });
 	} catch (error) {
 		logger.error('Adjust credits error:', error.message);
-		if (error.message.includes('not found')) {
+		if (error?.status === 404 || error.message.includes('not found')) {
 			return res.status(404).json({ error: 'User not found' });
 		}
 		throw error;
 	}
 });
 
-// POST /admin/users/:id/ban - Ban user
+// POST /admin/users/:id/ban
 router.post('/:id/ban', async (req, res) => {
-	const { id } = req.params;
-
 	try {
-		const updatedUser = await pb.collection('users').update(id, {
+		const updated = await pb.collection('users').update(req.params.id, {
 			banned_at: new Date().toISOString(),
 		});
-
-		logger.info(`User banned: ${id}`);
-
-		res.json({
-			user: {
-				id: updatedUser.id,
-				email: updatedUser.email,
-				name: updatedUser.name,
-				banned_at: updatedUser.banned_at,
-			},
-		});
+		logger.info(`User banned: ${req.params.id}`);
+		res.json({ user: publicUser(updated) });
 	} catch (error) {
 		logger.error('Ban user error:', error.message);
-		if (error.message.includes('not found')) {
+		if (error?.status === 404 || error.message.includes('not found')) {
 			return res.status(404).json({ error: 'User not found' });
 		}
 		throw error;
 	}
 });
 
-// POST /admin/users/:id/unban - Unban user
+// POST /admin/users/:id/unban
 router.post('/:id/unban', async (req, res) => {
-	const { id } = req.params;
-
 	try {
-		const updatedUser = await pb.collection('users').update(id, {
+		const updated = await pb.collection('users').update(req.params.id, {
 			banned_at: null,
 		});
-
-		logger.info(`User unbanned: ${id}`);
-
-		res.json({
-			user: {
-				id: updatedUser.id,
-				email: updatedUser.email,
-				name: updatedUser.name,
-				banned_at: updatedUser.banned_at,
-			},
-		});
+		logger.info(`User unbanned: ${req.params.id}`);
+		res.json({ user: publicUser(updated) });
 	} catch (error) {
 		logger.error('Unban user error:', error.message);
-		if (error.message.includes('not found')) {
+		if (error?.status === 404 || error.message.includes('not found')) {
 			return res.status(404).json({ error: 'User not found' });
 		}
 		throw error;
 	}
 });
 
-// DELETE /admin/users/:id - Delete user
+// DELETE /admin/users/:id
 router.delete('/:id', async (req, res) => {
-	const { id } = req.params;
-
 	try {
-		await pb.collection('users').delete(id);
-		logger.info(`User deleted: ${id}`);
+		await pb.collection('users').delete(req.params.id);
+		logger.info(`User deleted: ${req.params.id}`);
 		res.json({ success: true });
 	} catch (error) {
 		logger.error('Delete user error:', error.message);
-		if (error.message.includes('not found')) {
+		if (error?.status === 404 || error.message.includes('not found')) {
 			return res.status(404).json({ error: 'User not found' });
 		}
 		throw error;

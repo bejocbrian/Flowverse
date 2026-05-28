@@ -6,9 +6,18 @@ import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Slider } from '@/components/ui/slider.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
-import { Activity, ServerCrash, Save, RefreshCw } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import apiServerClient from '@/lib/apiServerClient.js';
+
+// The list endpoint returns API keys masked as "****abcd". We must never
+// round-trip that masked string back to the server as a "new" key, or we
+// would overwrite the real key. The backend also rejects masked values,
+// but the frontend should not even attempt the write.
+const isMaskedKey = (value) => {
+  if (!value) return true;
+  return value.startsWith('****') || value.includes('•');
+};
 
 const AdminProvidersPage = () => {
   const [providers, setProviders] = useState([]);
@@ -25,6 +34,8 @@ const AdminProvidersPage = () => {
       if (res.ok) {
         const data = await res.json();
         setProviders(data.providers || []);
+      } else {
+        toast('Failed to load providers');
       }
     } catch (error) {
       toast('Failed to load providers');
@@ -34,36 +45,53 @@ const AdminProvidersPage = () => {
   };
 
   const handleUpdate = async (id, field, value) => {
-    // Optimistic update locally
+    // Optimistic local update.
     setProviders(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
-    
+
     try {
-      const provider = providers.find(p => p.id === id);
-      const payload = { ...provider, [field]: value };
+      // Send only the changed field. Sending the full provider would
+      // include the masked api_key, which the backend now ignores anyway,
+      // but it's cleaner and safer to send a minimal patch.
+      const payload = { [field]: value };
       const res = await apiServerClient.fetch(`/admin/providers/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error('save failed');
+      const data = await res.json();
+      // Sync from the server's authoritative response (especially api_key
+      // which the server returns masked).
+      setProviders(prev => prev.map(p => p.id === id ? { ...p, ...data.provider } : p));
       toast('Provider settings saved');
     } catch (error) {
       toast('Failed to save settings');
-      fetchProviders(); // Revert on failure
+      fetchProviders();
     }
+  };
+
+  const handleApiKeyBlur = (id, currentValue, newValue) => {
+    if (!newValue || isMaskedKey(newValue)) return;
+    if (newValue === currentValue) return;
+    handleUpdate(id, 'api_key', newValue);
   };
 
   const handleTestConnection = async (id) => {
     try {
       const res = await apiServerClient.fetch(`/admin/providers/${id}/test`, { method: 'POST' });
+      if (!res.ok) throw new Error('test failed');
       const data = await res.json();
-      
-      setProviders(prev => prev.map(p => p.id === id ? { ...p, status: data.status, last_tested_at: new Date().toISOString() } : p));
-      
+
+      setProviders(prev => prev.map(p => p.id === id ? {
+        ...p,
+        status: data.status,
+        last_tested_at: new Date().toISOString(),
+      } : p));
+
       if (data.status === 'Operational') {
         toast(`Connection successful (${data.latency}ms)`);
       } else {
-        toast(`Connection failed: ${data.status}`);
+        toast(`Connection ${data.status}${data.reason ? `: ${data.reason}` : ''}`);
       }
     } catch (error) {
       toast('Test request failed');
@@ -73,7 +101,8 @@ const AdminProvidersPage = () => {
   const renderStatusBadge = (status) => {
     if (status === 'Operational') return <span className="status-operational">Operational</span>;
     if (status === 'Degraded') return <span className="status-degraded">Degraded</span>;
-    return <span className="status-down">Down</span>;
+    if (status === 'Down') return <span className="status-down">Down</span>;
+    return <span className="text-xs text-[hsl(var(--text-secondary))]">Untested</span>;
   };
 
   return (
@@ -86,12 +115,18 @@ const AdminProvidersPage = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold mb-1">Providers Management</h1>
-            <p className="text-[hsl(var(--text-secondary))]">Configure AI model providers, API keys, and routing weights.</p>
+            <p className="text-[hsl(var(--text-secondary))]">
+              Configure AI model providers, API keys, and routing weights.
+            </p>
           </div>
         </div>
 
         {loading ? (
           <div className="text-[hsl(var(--text-secondary))]">Loading providers...</div>
+        ) : providers.length === 0 ? (
+          <div className="admin-surface rounded-xl p-8 text-[hsl(var(--text-secondary))]">
+            No providers configured. Add a provider in PocketBase to get started.
+          </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {providers.map(provider => (
@@ -111,8 +146,8 @@ const AdminProvidersPage = () => {
                       </p>
                     </div>
                   </div>
-                  <Switch 
-                    checked={provider.enabled} 
+                  <Switch
+                    checked={!!provider.enabled}
                     onCheckedChange={(val) => handleUpdate(provider.id, 'enabled', val)}
                   />
                 </div>
@@ -121,17 +156,14 @@ const AdminProvidersPage = () => {
                   <div>
                     <label className="block text-sm font-medium text-[hsl(var(--text-secondary))] mb-2">API Key</label>
                     <div className="flex gap-2">
-                      <Input 
-                        type="password" 
-                        defaultValue={provider.api_key || '••••••••••••••••'} 
+                      <Input
+                        type="password"
+                        defaultValue={provider.api_key || ''}
+                        placeholder={provider.api_key ? '' : 'Paste API key'}
                         className="bg-[hsl(var(--elevated))] font-mono text-sm"
-                        onBlur={(e) => {
-                          if (e.target.value && !e.target.value.includes('••')) {
-                            handleUpdate(provider.id, 'api_key', e.target.value);
-                          }
-                        }}
+                        onBlur={(e) => handleApiKeyBlur(provider.id, provider.api_key, e.target.value)}
                       />
-                      <Button variant="outline" size="icon" onClick={() => handleTestConnection(provider.id)}>
+                      <Button variant="outline" size="icon" onClick={() => handleTestConnection(provider.id)} title="Test connection">
                         <Activity className="w-4 h-4" />
                       </Button>
                     </div>
@@ -151,16 +183,16 @@ const AdminProvidersPage = () => {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div>
                       <label className="block text-sm font-medium text-[hsl(var(--text-secondary))] mb-2 flex justify-between">
                         <span>Routing Weight</span>
                         <span className="font-mono text-[hsl(var(--accent-primary))]">{provider.weight || 0}%</span>
                       </label>
                       <div className="py-2">
-                        <Slider 
-                          defaultValue={[provider.weight || 0]} 
-                          max={100} 
+                        <Slider
+                          defaultValue={[provider.weight || 0]}
+                          max={100}
                           step={5}
                           onValueCommit={(vals) => handleUpdate(provider.id, 'weight', vals[0])}
                         />
@@ -172,41 +204,6 @@ const AdminProvidersPage = () => {
             ))}
           </div>
         )}
-
-        <div className="mt-12 admin-surface rounded-xl p-8 border-[hsl(var(--admin-border))]">
-          <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-            <ServerCrash className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
-            Global Routing Settings
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div>
-              <label className="block text-sm font-medium text-[hsl(var(--text-secondary))] mb-2">Default Fallback</label>
-              <Select defaultValue="runway">
-                <SelectTrigger className="bg-[hsl(var(--elevated))]">
-                  <SelectValue placeholder="Select provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers.map(p => <SelectItem key={p.id} value={p.name.toLowerCase()}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-[hsl(var(--text-secondary))] mt-2">Used if all primary nodes fail.</p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-[hsl(var(--text-secondary))] mb-2">Max Queue Length</label>
-              <Input type="number" defaultValue={500} className="bg-[hsl(var(--elevated))] font-mono" />
-              <p className="text-xs text-[hsl(var(--text-secondary))] mt-2">Reject jobs if queue exceeds this.</p>
-            </div>
-            
-            <div className="flex items-end">
-              <Button className="w-full">
-                <Save className="w-4 h-4 mr-2" />
-                Save Global Settings
-              </Button>
-            </div>
-          </div>
-        </div>
       </div>
     </>
   );

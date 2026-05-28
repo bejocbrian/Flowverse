@@ -67,6 +67,11 @@ const AdminSettingsPage = () => {
       });
       if (res.ok) {
         toast('Settings saved successfully');
+        // Re-read from the server so we display whatever it actually
+        // persisted (and benefit from any value normalization).
+        await fetchSettings();
+      } else {
+        toast('Failed to save settings');
       }
     } catch (error) {
       toast('Failed to save settings');
@@ -280,12 +285,22 @@ const AdminSettingsPage = () => {
                       className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white" 
                     />
                   </div>
-                  <div className="space-y-2 md:col-span-2">
+                  <div className="space-y-2">
                     <Label className="text-[hsl(var(--text-secondary))]">Logo URL</Label>
                     <Input 
                       value={settings.logo_url || ''} 
                       onChange={(e) => updateSetting('logo_url', e.target.value)}
                       className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono" 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[hsl(var(--text-secondary))]">Primary Color</Label>
+                    <Input
+                      type="text"
+                      value={settings.primary_color || ''}
+                      onChange={(e) => updateSetting('primary_color', e.target.value)}
+                      placeholder="#6366f1"
+                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono"
                     />
                   </div>
                 </div>
