@@ -147,6 +147,10 @@ export const AuthProvider = ({ children }) => {
   const updateProfile = async (updates) => {
     try {
       const updated = await pb.collection('users').update(currentUser.id, updates, { $autoCancel: false });
+      // Persist back into the authStore so a hard reload picks up the
+      // new field values (otherwise authStore.model is whatever was
+      // there at login time and the user looks unchanged after reload).
+      pb.authStore.save(pb.authStore.token, updated);
       setCurrentUser(updated);
       setRole(updated.role || 'consumer');
       return updated;
@@ -159,6 +163,7 @@ export const AuthProvider = ({ children }) => {
   const refreshUser = async () => {
     try {
       const updated = await pb.collection('users').getOne(currentUser.id, { $autoCancel: false });
+      pb.authStore.save(pb.authStore.token, updated);
       setCurrentUser(updated);
       setRole(updated.role || 'consumer');
       return updated;
