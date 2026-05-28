@@ -9,8 +9,6 @@ import {
 	Loader2,
 	Share2,
 	Sparkles,
-	Mail,
-	CheckCircle2,
 	ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,7 +24,11 @@ const USE_CASES = [
 	{ id: 'other', label: 'Something else', desc: 'I will tell you later', icon: Sparkles },
 ];
 
-const TOTAL_STEPS = 3;
+// Email verification step is intentionally commented out: verification
+// is disabled platform-wide (see /auth/signup and grant-initial-credits.pb.js).
+// Showing a "verify your email" screen the user could not act on was
+// confusing. If verification ever returns, restore the step from history.
+const TOTAL_STEPS = 2;
 
 /* -------------------------------------------------------------------------- */
 
@@ -47,13 +49,18 @@ const OnboardingPage = () => {
 	const navigate = useNavigate();
 	const { currentUser, updateProfile } = useAuth();
 	const [step, setStep] = useState(0);
-	const [useCase, setUseCase] = useState('');
+	// Pre-fill from the saved profile so coming back here doesn't wipe the
+	// previous answer.
+	const [useCase, setUseCase] = useState(currentUser?.use_case || '');
 	const [loading, setLoading] = useState(false);
 
 	const handleComplete = async () => {
 		setLoading(true);
 		try {
-			await updateProfile({ onboarding_completed: true });
+			await updateProfile({
+				use_case: useCase,
+				onboarding_completed: true,
+			});
 			toast.success('Welcome to your workspace');
 			navigate('/app/generate');
 		} catch (err) {
@@ -63,11 +70,22 @@ const OnboardingPage = () => {
 		}
 	};
 
-	const handleNext = () => {
-		if (step === 0 && !useCase) {
-			toast('Pick a use case to continue');
-			return;
+	const handleNext = async () => {
+		if (step === 0) {
+			if (!useCase) {
+				toast('Pick a use case to continue');
+				return;
+			}
+			// Persist the use case the moment it's chosen so even if the user
+			// closes the tab on the next step we don't lose the answer.
+			try {
+				await updateProfile({ use_case: useCase });
+			} catch (err) {
+				// Non-fatal: we'll still try again on completion.
+				console.warn('Could not save use_case yet:', err?.message);
+			}
 		}
+
 		if (step < TOTAL_STEPS - 1) {
 			setStep((s) => s + 1);
 		} else {
@@ -75,7 +93,6 @@ const OnboardingPage = () => {
 		}
 	};
 
-	const isVerified = Boolean(currentUser?.verified);
 	const balance = currentUser?.credits_balance ?? 0;
 
 	return (
@@ -158,60 +175,16 @@ const OnboardingPage = () => {
 								</motion.div>
 							)}
 
+							{/*
+								Email verification step removed (verification disabled).
+								Original step content lives in git history; restore by
+								bumping TOTAL_STEPS back to 3 and re-adding the step
+								between use-case (0) and ready-to-create (was 2).
+							*/}
+
 							{step === 1 && (
 								<motion.div
 									key="step-1"
-									initial={{ opacity: 0, x: 16 }}
-									animate={{ opacity: 1, x: 0 }}
-									exit={{ opacity: 0, x: -16 }}
-									className="space-y-5"
-								>
-									<div className="flex items-start gap-3">
-										<span
-											className={`p-2 rounded-lg ${
-												isVerified ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
-											}`}
-										>
-											{isVerified ? <CheckCircle2 className="w-5 h-5" /> : <Mail className="w-5 h-5" />}
-										</span>
-										<div>
-											<h1 className="text-2xl font-semibold tracking-tight mb-1.5">
-												{isVerified ? 'Email verified' : 'Verify your email'}
-											</h1>
-											<p className="text-sm text-[hsl(var(--text-secondary))]">
-												{isVerified
-													? 'You are all set. Free credits have been added to your account.'
-													: 'We sent you a link. Click it to confirm your email and unlock free credits.'}
-											</p>
-										</div>
-									</div>
-
-									<div className="rounded-xl bg-black/40 border border-white/5 p-4">
-										<div className="flex items-center justify-between mb-1.5">
-											<span className="text-xs uppercase tracking-wider text-white/40 font-mono">
-												Account email
-											</span>
-											{isVerified && (
-												<span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
-													Verified
-												</span>
-											)}
-										</div>
-										<p className="text-sm font-medium truncate">{currentUser?.email}</p>
-									</div>
-
-									{!isVerified && (
-										<p className="text-xs text-white/50 leading-relaxed">
-											Did not get the email? Check spam, or skip this step and verify later from
-											Settings.
-										</p>
-									)}
-								</motion.div>
-							)}
-
-							{step === 2 && (
-								<motion.div
-									key="step-2"
 									initial={{ opacity: 0, x: 16 }}
 									animate={{ opacity: 1, x: 0 }}
 									exit={{ opacity: 0, x: -16 }}
@@ -239,9 +212,7 @@ const OnboardingPage = () => {
 											</span>
 										</div>
 										<p className="text-[11px] text-white/40 mt-1.5">
-											{isVerified
-												? 'Free credits added on email verification.'
-												: 'Verify your email to unlock more free credits.'}
+											Welcome credits added to your account.
 										</p>
 									</div>
 								</motion.div>

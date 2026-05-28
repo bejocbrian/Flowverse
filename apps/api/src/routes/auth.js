@@ -99,17 +99,13 @@ router.post('/signup', signupLimiter, async (req, res) => {
 			passwordConfirm: password,
 			name,
 			role: role === 'admin' ? 'consumer' : (role || 'consumer'),
-			// Credits are NOT granted here. See pb_hooks/grant-initial-credits.pb.js
-			credits_balance: 0,
+			// Email verification is disabled. Grant the welcome credit balance
+			// directly at signup. `initial_credits_granted=true` keeps the
+			// pb_hooks/grant-initial-credits.pb.js hook from double-granting if
+			// verification is ever re-enabled.
+			credits_balance: 50,
+			initial_credits_granted: true,
 		});
-
-		// Trigger PocketBase to send the verification email. If SMTP is not
-		// configured, this no-ops.
-		try {
-			await pb.collection('users').requestVerification(email);
-		} catch (verifyErr) {
-			logger.warn('Could not send verification email:', verifyErr.message);
-		}
 
 		const authData = await pb.collection('users').authWithPassword(email, password);
 
@@ -124,6 +120,9 @@ router.post('/signup', signupLimiter, async (req, res) => {
 				role: authData.record.role,
 				credits_balance: authData.record.credits_balance,
 				verified: authData.record.verified,
+				onboarding_completed: !!authData.record.onboarding_completed,
+				use_case: authData.record.use_case || null,
+				banned_at: authData.record.banned_at || null,
 			},
 			token: authData.token,
 		});
@@ -192,6 +191,9 @@ router.post('/login', loginLimiter, async (req, res) => {
 				role: authData.record.role,
 				credits_balance: authData.record.credits_balance,
 				verified: authData.record.verified,
+				onboarding_completed: !!authData.record.onboarding_completed,
+				use_case: authData.record.use_case || null,
+				banned_at: authData.record.banned_at || null,
 			},
 			token: authData.token,
 		});
