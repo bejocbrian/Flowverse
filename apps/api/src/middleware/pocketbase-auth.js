@@ -39,6 +39,12 @@ export async function pocketbaseAuth(req, res, next) {
 			.collection(collectionName)
 			.authRefresh();
 
+		if (refreshed.record.banned_at) {
+			return res.status(403).json({
+				error: 'Account is suspended',
+			});
+		}
+
 		req.pocketbaseUserId = refreshed.record.id;
 		req.pocketbaseUser = refreshed.record;
 

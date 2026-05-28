@@ -105,26 +105,42 @@ const AdminDashboard = () => {
           <div className="admin-surface rounded-xl p-6 flex flex-col">
             <h3 className="text-lg font-bold mb-6">Quick Actions</h3>
             <div className="space-y-4 flex-1">
-              <Button variant="outline" className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]">
-                <FileText className="w-5 h-5 mr-3 text-[hsl(var(--text-secondary))]" />
-                <div>
-                  <div className="font-medium">View System Logs</div>
-                  <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">Check detailed application errors</div>
-                </div>
-              </Button>
-              <Button variant="outline" className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]">
-                <Server className="w-5 h-5 mr-3 text-[hsl(var(--text-secondary))]" />
-                <div>
-                  <div className="font-medium">Test Connections</div>
-                  <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">Ping all active providers</div>
-                </div>
-              </Button>
-              <Button variant="outline" className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]">
+              <Button
+                variant="outline"
+                className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]"
+                onClick={() => fetchDashboardData()}
+              >
                 <Activity className="w-5 h-5 mr-3 text-[hsl(var(--text-secondary))]" />
                 <div>
-                  <div className="font-medium">Clear Queue</div>
-                  <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">Reset stuck generation jobs</div>
+                  <div className="font-medium">Refresh Stats</div>
+                  <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">Reload analytics from the database</div>
                 </div>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]"
+                asChild
+              >
+                <a href="/admin/providers">
+                  <Server className="w-5 h-5 mr-3 text-[hsl(var(--text-secondary))]" />
+                  <div>
+                    <div className="font-medium">Manage Providers</div>
+                    <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">Configure and test AI providers</div>
+                  </div>
+                </a>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start text-left h-auto py-4 border-[hsl(var(--admin-border))] hover:bg-[hsl(var(--admin-hover))]"
+                asChild
+              >
+                <a href="/admin/users">
+                  <FileText className="w-5 h-5 mr-3 text-[hsl(var(--text-secondary))]" />
+                  <div>
+                    <div className="font-medium">Manage Users</div>
+                    <div className="text-xs text-[hsl(var(--text-secondary))] mt-1">View, ban, or adjust credits</div>
+                  </div>
+                </a>
               </Button>
             </div>
           </div>
