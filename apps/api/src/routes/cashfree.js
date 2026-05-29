@@ -111,18 +111,40 @@ router.post('/create-order', cashfreeRateLimit, async (req, res) => {
 			order_note: `Aether credits: ${creditAmount}`,
 		};
 
-		const cfResponse = await fetch(`${cashfreeBaseUrl()}/orders`, {
-			method: 'POST',
-			headers: cashfreeHeaders(),
-			body: JSON.stringify(body),
-		});
+		let cfResponse;
+		try {
+			cfResponse = await fetch(`${cashfreeBaseUrl()}/orders`, {
+				method: 'POST',
+				headers: cashfreeHeaders(),
+				body: JSON.stringify(body),
+				signal: AbortSignal.timeout(15000),
+			});
+		} catch (netErr) {
+			logger.error(`Cashfree create-order network error: ${netErr.message}`);
+			return res.status(502).json({
+				error: 'Could not reach Cashfree. Please try again.',
+				detail: netErr.message,
+			});
+		}
 
 		const cfData = await cfResponse.json().catch(() => ({}));
 
 		if (!cfResponse.ok) {
-			logger.error(`Cashfree create-order failed (${cfResponse.status}): ${JSON.stringify(cfData)}`);
+			// Surface Cashfree's real reason. Common causes: wrong/missing
+			// API keys, sandbox keys used against the production endpoint
+			// (or vice-versa), or an unsupported x-api-version.
+			const reason =
+				cfData?.message ||
+				cfData?.error_description ||
+				cfData?.type ||
+				`Cashfree returned HTTP ${cfResponse.status}`;
+			logger.error(
+				`Cashfree create-order failed (${cfResponse.status}) env=${process.env.CASHFREE_ENV || 'sandbox'}: ${JSON.stringify(cfData)}`,
+			);
 			return res.status(502).json({
-				error: cfData?.message || 'Failed to create Cashfree order',
+				error: reason,
+				cashfree_status: cfResponse.status,
+				cashfree_code: cfData?.code || null,
 			});
 		}
 
