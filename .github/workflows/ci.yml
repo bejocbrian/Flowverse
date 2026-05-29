@@ -44,6 +44,31 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
 
+  # Fail fast if package.json and the lockfile have drifted. This is the
+  # exact failure that silently broke deploys: `npm ci` errors out when a
+  # declared dependency is missing from the lockfile. Catching it here gives
+  # a clear, early signal at PR time instead of a cryptic deploy failure.
+  lockfile-sync:
+    name: Lockfile in sync
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
+            apps/web/package-lock.json
+
+      - name: Verify lockfile matches package.json (npm ci)
+        run: npm ci --workspaces --include-workspace-root
+
   lint-api:
     name: Lint API
     needs: changes
@@ -107,18 +132,19 @@ jobs:
   # Aggregator job - lets you require a single status check on the branch
   ci:
     name: CI
-    needs: [lint-api, lint-build-web]
+    needs: [lockfile-sync, lint-api, lint-build-web]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
         env:
+          LOCKFILE_RESULT: ${{ needs.lockfile-sync.result }}
           API_RESULT: ${{ needs.lint-api.result }}
           WEB_RESULT: ${{ needs.lint-build-web.result }}
         run: |
           set -euo pipefail
           fail=0
-          for r in "$API_RESULT" "$WEB_RESULT"; do
+          for r in "$LOCKFILE_RESULT" "$API_RESULT" "$WEB_RESULT"; do
             if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
               echo "Required job failed with result: $r"
               fail=1

@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "vite --host :: --port 3000",
-    "build": "node tools/generate-llms.js || true && vite build --outDir dist",
+    "prebuild": "node tools/generate-llms.js || true",
+    "build": "vite build --outDir dist",
     "start": "npx serve -s dist -l 3000",
     "preview": "vite preview --outDir dist --host :: --port 3000",
     "lint": "eslint . --quiet",
