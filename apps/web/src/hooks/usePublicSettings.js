@@ -11,7 +11,7 @@ const DEFAULT = {
 	},
 	default_aspect_ratio: { text: '16:9' },
 	default_quality: { text: 'Standard' },
-	payment_methods: { stripe: true, cashfree: false },
+	payment_methods: { stripe: false, cashfree: true },
 };
 
 /**

@@ -9,7 +9,7 @@ import logger from './logger.js';
 const CACHE_MS = 10_000;
 let cache = { fetchedAt: 0, value: null };
 
-const DEFAULT = { stripe: true, cashfree: false };
+const DEFAULT = { stripe: false, cashfree: true };
 
 function coerceBool(value, fallback) {
 	if (typeof value === 'boolean') return value;
