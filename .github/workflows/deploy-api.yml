@@ -1,13 +1,12 @@
 name: Deploy API to Hostinger
 
+# NOTE: The API runs on Hostinger's managed Node.js (Business plan), which
+# deploys via Hostinger's own Git integration / app manager - NOT via this
+# workflow's PM2-over-SSH flow. This workflow is therefore manual-only
+# (workflow_dispatch) so it does not fail on every push. Keep it for VPS/PM2
+# setups or emergency manual deploys; trigger it from the Actions tab if
+# you actually want the SSH-based deploy.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/api/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
 concurrency:

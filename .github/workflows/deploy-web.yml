@@ -42,6 +42,11 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_POCKETBASE_URL: ${{ secrets.VITE_POCKETBASE_URL }}
+          # Optional override for the Cashfree SDK mode. Normally the mode is
+          # driven by the server (/settings/public -> cashfree_mode), so this
+          # only needs setting if you want to force sandbox/production on the
+          # client regardless of the API.
+          VITE_CASHFREE_ENV: ${{ secrets.VITE_CASHFREE_ENV }}
         run: npm run build --workspace apps/web
 
       - name: Setup SSH

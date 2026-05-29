@@ -41,13 +41,25 @@ export async function getPaymentMethods() {
 		const value = {
 			stripe: coerceBool(map.payment_stripe_enabled, DEFAULT.stripe),
 			cashfree: coerceBool(map.payment_cashfree_enabled, DEFAULT.cashfree),
+			// Surface the server's Cashfree environment so the frontend SDK
+			// loads in the matching mode (sandbox vs production). Driving this
+			// from the server avoids a frontend/back-end mode mismatch that
+			// silently breaks checkout.
+			cashfree_mode: (process.env.CASHFREE_ENV || 'sandbox').toLowerCase() === 'production'
+				? 'production'
+				: 'sandbox',
 		};
 
 		cache = { fetchedAt: now, value };
 		return value;
 	} catch (error) {
 		logger.warn('paymentMethods: settings lookup failed, using defaults:', error.message);
-		return DEFAULT;
+		return {
+			...DEFAULT,
+			cashfree_mode: (process.env.CASHFREE_ENV || 'sandbox').toLowerCase() === 'production'
+				? 'production'
+				: 'sandbox',
+		};
 	}
 }
 

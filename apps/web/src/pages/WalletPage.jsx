@@ -291,6 +291,7 @@ const WalletPage = () => {
 														creditAmount={pkg.credits}
 														price={pkg.price}
 														popular={pkg.popular}
+														mode={paymentMethods.cashfree_mode}
 														className="w-full mt-auto"
 													/>
 												) : (
