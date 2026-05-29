@@ -48,12 +48,35 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
+          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '22' }}
         run: |
+          set -euo pipefail
+
+          missing=0
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "::error::Secret HOSTINGER_SSH_PRIVATE_KEY is empty or not set."
+            missing=1
+          fi
+          if [ -z "${SSH_HOST:-}" ]; then
+            echo "::error::Secret HOSTINGER_HOST is empty or not set."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Set the required secrets under Settings > Secrets and variables > Actions (Environment: production)."
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Don't hide errors: if the host is unreachable or the key/port is
+          # wrong, we want the real reason in the log.
+          if ! ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts; then
+            echo "::error::ssh-keyscan failed for $SSH_HOST:$SSH_PORT. Check HOSTINGER_HOST / HOSTINGER_SSH_PORT and that the host allows SSH from GitHub runners."
+            exit 1
+          fi
 
       - name: Sync dist to Hostinger via rsync over SSH
         env:
@@ -62,6 +85,17 @@ jobs:
           SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '22' }}
           WEB_REMOTE_DIR: ${{ vars.HOSTINGER_WEB_DIR }}
         run: |
+          set -euo pipefail
+
+          if [ -z "${SSH_USER:-}" ]; then
+            echo "::error::Secret HOSTINGER_USER is empty or not set."
+            exit 1
+          fi
+          if [ -z "${WEB_REMOTE_DIR:-}" ]; then
+            echo "::error::Variable HOSTINGER_WEB_DIR is empty or not set."
+            exit 1
+          fi
+
           rsync -az --delete \
             -e "ssh -p $SSH_PORT -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new" \
             apps/web/dist/ \
