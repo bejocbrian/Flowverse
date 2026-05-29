@@ -3,6 +3,7 @@ import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { adminRoleCheck } from '../middleware/admin-role-check.js';
 import rateLimit from 'express-rate-limit';
+import { invalidatePaymentMethodsCache } from '../utils/paymentMethods.js';
 
 const router = Router();
 
@@ -107,6 +108,7 @@ router.post('/', async (req, res) => {
 		}
 
 		logger.info('Settings updated');
+		invalidatePaymentMethodsCache();
 		res.json(updated);
 	} catch (error) {
 		logger.error('Update settings error:', error.message);

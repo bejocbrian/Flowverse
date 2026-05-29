@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import logger from '../utils/logger.js';
 import rateLimit from 'express-rate-limit';
+import { getPaymentMethods } from '../utils/paymentMethods.js';
 
 const router = Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -18,6 +19,11 @@ router.use(pocketbaseAuth);
 
 // POST /stripe/create-checkout-session
 router.post('/create-checkout-session', stripeRateLimit, async (req, res) => {
+	const methods = await getPaymentMethods();
+	if (!methods.stripe) {
+		return res.status(503).json({ error: 'Stripe payments are currently disabled' });
+	}
+
 	const { creditAmount, price, successUrl, cancelUrl } = req.body;
 
 	if (!creditAmount || !price || !successUrl || !cancelUrl) {

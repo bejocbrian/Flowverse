@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
+import { getPaymentMethods } from '../utils/paymentMethods.js';
 
 const router = Router();
 
@@ -37,22 +38,21 @@ function parseSettingValue(value) {
 
 /**
  * GET /settings/public
- * Returns public settings that the frontend needs (feature flags, defaults, etc.)
- * This endpoint is publicly accessible (no auth required)
+ * Returns public settings that the frontend needs (feature flags, defaults,
+ * payment method availability).
+ *
+ * Publicly accessible: contains nothing secret.
  */
 router.get('/public', async (req, res) => {
 	try {
-		// Fetch all settings from database
 		const settings = await pb.collection('settings').getFullList();
-		
 		const publicSettings = {};
-		
-		// Process each setting
 		settings.forEach(setting => {
 			publicSettings[setting.key] = parseSettingValue(setting.value);
 		});
 
-		// Apply defaults for missing settings
+		const payment_methods = await getPaymentMethods();
+
 		const response = {
 			feature_flags: {
 				...DEFAULT_FEATURE_FLAGS,
@@ -61,13 +61,17 @@ router.get('/public', async (req, res) => {
 			default_duration: publicSettings.default_duration || DEFAULT_SETTINGS.default_duration,
 			default_aspect_ratio: publicSettings.default_aspect_ratio || DEFAULT_SETTINGS.default_aspect_ratio,
 			default_quality: publicSettings.default_quality || DEFAULT_SETTINGS.default_quality,
+			payment_methods,
 		};
 
 		res.json(response);
 	} catch (error) {
 		logger.error('Fetch public settings error:', error.message);
-		// Return defaults on error - this ensures the app always works
-		res.json(DEFAULT_SETTINGS);
+		// Always return something useful so the app renders.
+		res.json({
+			...DEFAULT_SETTINGS,
+			payment_methods: { stripe: true, cashfree: false },
+		});
 	}
 });
 

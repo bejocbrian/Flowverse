@@ -17,11 +17,21 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
 import StripeCheckoutButton from '@/components/StripeCheckoutButton.jsx';
+import CashfreeCheckoutButton from '@/components/CashfreeCheckoutButton.jsx';
+import usePublicSettings from '@/hooks/usePublicSettings.js';
 
 const STRIPE_PACKAGES = [
 	{ credits: 50, price: 4.99, popular: false, label: 'Starter' },
 	{ credits: 100, price: 8.99, popular: true, label: 'Standard' },
 	{ credits: 500, price: 39.99, popular: false, label: 'Studio' },
+];
+
+// Cashfree primarily settles in INR. Approximate INR pricing in line with
+// the Stripe USD packs above; admins can later move these to settings.
+const CASHFREE_PACKAGES = [
+	{ credits: 50, price: 399, popular: false, label: 'Starter' },
+	{ credits: 100, price: 749, popular: true, label: 'Standard' },
+	{ credits: 500, price: 3299, popular: false, label: 'Studio' },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -69,6 +79,16 @@ const WalletPage = () => {
 	const [transactions, setTransactions] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
+	const { settings: publicSettings } = usePublicSettings();
+	const paymentMethods = publicSettings.payment_methods;
+	const [provider, setProvider] = useState('stripe'); // 'stripe' | 'cashfree'
+
+	useEffect(() => {
+		// Pick the first enabled provider as the default. If the admin only
+		// enabled one, the picker collapses naturally below.
+		if (!paymentMethods.stripe && paymentMethods.cashfree) setProvider('cashfree');
+		else if (paymentMethods.stripe) setProvider('stripe');
+	}, [paymentMethods]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -189,44 +209,104 @@ const WalletPage = () => {
 					</div>
 
 					{tab === 'buy' ? (
-						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-							{STRIPE_PACKAGES.map((pkg) => (
-								<motion.div
-									key={pkg.credits}
-									initial={{ opacity: 0, y: 12 }}
-									whileInView={{ opacity: 1, y: 0 }}
-									viewport={{ once: true }}
-									className={`relative bg-white/[0.03] border rounded-2xl p-7 flex flex-col ${
-										pkg.popular
-											? 'border-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
-											: 'border-white/10'
-									}`}
-								>
-									{pkg.popular && (
-										<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white">
-											Most popular
+						(() => {
+							const stripeOn = paymentMethods.stripe;
+							const cashfreeOn = paymentMethods.cashfree;
+
+							if (!stripeOn && !cashfreeOn) {
+								return (
+									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
+										<h2 className="text-lg font-semibold mb-1">Payments are paused</h2>
+										<p className="text-sm text-white/50">
+											Buying credits is temporarily unavailable. Please try again later.
+										</p>
+									</div>
+								);
+							}
+
+							const showSwitch = stripeOn && cashfreeOn;
+							const usingCashfree = provider === 'cashfree' && cashfreeOn;
+							const packages = usingCashfree ? CASHFREE_PACKAGES : STRIPE_PACKAGES;
+							const currencySymbol = usingCashfree ? '₹' : '$';
+
+							return (
+								<>
+									{showSwitch && (
+										<div className="flex gap-1 p-1 rounded-full border border-white/10 bg-white/[0.03] w-fit mb-5">
+											<button
+												onClick={() => setProvider('stripe')}
+												className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+													provider === 'stripe' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
+												}`}
+											>
+												Card (USD)
+											</button>
+											<button
+												onClick={() => setProvider('cashfree')}
+												className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+													provider === 'cashfree' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
+												}`}
+											>
+												UPI / Cards (INR)
+											</button>
 										</div>
 									)}
-									<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60">
-										{pkg.label}
-									</h3>
-									<div className="mt-3 mb-1 flex items-baseline gap-2">
-										<span className="text-5xl font-bold tracking-tight">{pkg.credits}</span>
-										<span className="text-sm text-white/40">credits</span>
+
+									<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+										{packages.map((pkg) => (
+											<motion.div
+												key={`${usingCashfree ? 'cf' : 'stripe'}-${pkg.credits}`}
+												initial={{ opacity: 0, y: 12 }}
+												whileInView={{ opacity: 1, y: 0 }}
+												viewport={{ once: true }}
+												className={`relative bg-white/[0.03] border rounded-2xl p-7 flex flex-col ${
+													pkg.popular
+														? 'border-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
+														: 'border-white/10'
+												}`}
+											>
+												{pkg.popular && (
+													<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white">
+														Most popular
+													</div>
+												)}
+												<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60">
+													{pkg.label}
+												</h3>
+												<div className="mt-3 mb-1 flex items-baseline gap-2">
+													<span className="text-5xl font-bold tracking-tight">{pkg.credits}</span>
+													<span className="text-sm text-white/40">credits</span>
+												</div>
+												<p className="text-2xl font-semibold mt-4">
+													{currencySymbol}
+													{pkg.price}
+												</p>
+												<p className="text-xs text-white/40 mt-0.5 mb-6">
+													{currencySymbol}
+													{(pkg.price / pkg.credits).toFixed(usingCashfree ? 2 : 3)} per credit
+												</p>
+												{usingCashfree ? (
+													<CashfreeCheckoutButton
+														creditAmount={pkg.credits}
+														price={pkg.price}
+														popular={pkg.popular}
+														className="w-full mt-auto"
+													/>
+												) : (
+													<StripeCheckoutButton
+														creditAmount={pkg.credits}
+														price={pkg.price}
+														popular={pkg.popular}
+														className="w-full mt-auto"
+													/>
+												)}
+											</motion.div>
+										))}
 									</div>
-									<p className="text-2xl font-semibold mt-4">${pkg.price}</p>
-									<p className="text-xs text-white/40 mt-0.5 mb-6">
-										${(pkg.price / pkg.credits).toFixed(3)} per credit
-									</p>
-									<StripeCheckoutButton
-										creditAmount={pkg.credits}
-										price={pkg.price}
-										popular={pkg.popular}
-										className="w-full mt-auto"
-									/>
-								</motion.div>
-							))}
-						</div>
+								</>
+							);
+						})()
 					) : loading ? (
 						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
 							<Loader2 className="w-6 h-6 animate-spin text-white/40" />

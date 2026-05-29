@@ -117,6 +117,9 @@ const AdminSettingsPage = () => {
               <TabsTrigger value="billing" className="data-[state=active]:bg-[hsl(var(--elevated))] py-2 px-4 gap-2">
                 <CreditCard className="w-4 h-4" /> Billing
               </TabsTrigger>
+              <TabsTrigger value="payments" className="data-[state=active]:bg-[hsl(var(--elevated))] py-2 px-4 gap-2">
+                <CreditCard className="w-4 h-4" /> Payments
+              </TabsTrigger>
               <TabsTrigger value="ratelimits" className="data-[state=active]:bg-[hsl(var(--elevated))] py-2 px-4 gap-2">
                 <Activity className="w-4 h-4" /> Rate Limits
               </TabsTrigger>
@@ -360,6 +363,47 @@ const AdminSettingsPage = () => {
                     value="pk_live_••••••••••••••••" 
                     className="bg-[hsl(var(--admin-hover))] border-[hsl(var(--admin-border))] text-[hsl(var(--text-secondary))] font-mono opacity-50 cursor-not-allowed" 
                   />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="payments" className="mt-0 space-y-6">
+                <h3 className="text-lg font-bold border-b border-[hsl(var(--admin-border))] pb-4 mb-4">Payment Methods</h3>
+                <p className="text-[hsl(var(--text-secondary))] text-sm mb-6">
+                  Toggle which checkout providers are offered to users. Disabling a provider hides it from the wallet immediately and rejects new checkout sessions on the API.
+                </p>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-[hsl(var(--elevated))] rounded-lg border border-[hsl(var(--admin-border))]">
+                    <div className="flex items-center gap-3">
+                      <CreditCard className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
+                      <div>
+                        <Label className="text-white font-medium">Stripe (USD card payments)</Label>
+                        <p className="text-[hsl(var(--text-secondary))] text-sm">
+                          Hosted Stripe Checkout. Configure with STRIPE_SECRET_KEY in the API env.
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.payment_stripe_enabled !== false}
+                      onCheckedChange={(checked) => updateSetting('payment_stripe_enabled', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-[hsl(var(--elevated))] rounded-lg border border-[hsl(var(--admin-border))]">
+                    <div className="flex items-center gap-3">
+                      <CreditCard className="w-5 h-5 text-emerald-300" />
+                      <div>
+                        <Label className="text-white font-medium">Cashfree (India: UPI, cards, netbanking)</Label>
+                        <p className="text-[hsl(var(--text-secondary))] text-sm">
+                          Cashfree hosted checkout. Configure CASHFREE_APP_ID and CASHFREE_SECRET_KEY in the API env.
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.payment_cashfree_enabled === true}
+                      onCheckedChange={(checked) => updateSetting('payment_cashfree_enabled', checked)}
+                    />
+                  </div>
                 </div>
               </TabsContent>
 

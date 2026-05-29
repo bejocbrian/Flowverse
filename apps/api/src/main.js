@@ -50,7 +50,17 @@ app.use(cors({
 }));
 app.use(morgan('combined'));
 app.use(globalRateLimit);
-app.use(express.json({ limit: BodyLimit }));
+// Stash the raw body bytes for webhook routes that require HMAC
+// verification. We can't use a separate `raw()` parser per-route here
+// because express.json runs first globally and would consume the stream.
+app.use(express.json({
+	limit: BodyLimit,
+	verify: (req, _res, buf) => {
+		if (req.originalUrl?.startsWith('/webhooks/cashfree')) {
+			req.rawBody = buf;
+		}
+	},
+}));
 app.use(express.urlencoded({ extended: true, limit: BodyLimit }));
 
 app.use('/', routes());
