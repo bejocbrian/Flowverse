@@ -50,18 +50,24 @@ app.use(cors({
 }));
 app.use(morgan('combined'));
 app.use(globalRateLimit);
-// Stash the raw body bytes for webhook routes that require HMAC
-// verification. We can't use a separate `raw()` parser per-route here
-// because express.json runs first globally and would consume the stream.
-app.use(express.json({
-	limit: BodyLimit,
-	verify: (req, _res, buf) => {
-		if (req.originalUrl?.startsWith('/webhooks/cashfree')) {
-			req.rawBody = buf;
-		}
-	},
-}));
-app.use(express.urlencoded({ extended: true, limit: BodyLimit }));
+// Capture the raw request body bytes so webhook routes can verify HMAC
+// signatures (Cashfree signs the raw payload, not the parsed JSON). We
+// stash it for every request because the per-route URL check inside a
+// body-parser `verify` callback is fragile - it depends on Content-Type
+// matching the specific parser. Storing a Buffer reference is cheap.
+const captureRawBody = (req, _res, buf) => {
+	if (buf && buf.length) {
+		req.rawBody = buf;
+	}
+};
+
+app.use(express.json({ limit: BodyLimit, verify: captureRawBody }));
+app.use(express.urlencoded({ extended: true, limit: BodyLimit, verify: captureRawBody }));
+// Fallback parser: if Cashfree (or any webhook) sends a Content-Type that
+// isn't JSON or urlencoded, the two parsers above won't run and rawBody
+// would be missing. This raw parser catches everything else and still
+// captures the bytes + leaves a Buffer on req.body.
+app.use(express.raw({ type: () => true, limit: BodyLimit, verify: captureRawBody }));
 
 app.use('/', routes());
 

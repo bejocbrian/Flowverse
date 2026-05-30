@@ -51,7 +51,20 @@ router.post('/cashfree', async (req, res) => {
 		);
 	}
 
-	const payload = req.body || {};
+	// Parse the payload from the verified raw bytes when available, so we
+	// don't depend on which body parser ran (json vs raw fallback). Fall
+	// back to req.body if it's already a parsed object.
+	let payload = {};
+	if (rawBody && rawBody.length) {
+		try {
+			payload = JSON.parse(rawBody.toString('utf8'));
+		} catch {
+			payload = (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) ? req.body : {};
+		}
+	} else if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+		payload = req.body;
+	}
+
 	const eventType = payload?.type || payload?.event_type;
 	const data = payload?.data || {};
 	const order = data.order || {};
