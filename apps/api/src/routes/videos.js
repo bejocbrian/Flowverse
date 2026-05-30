@@ -242,7 +242,6 @@ router.get('/:id', async (req, res) => {
 				output_type: video.output_type || 'video',
 				credit_cost: video.credit_cost,
 				error_message: video.error_message,
-				external_id: video.external_id,
 				created: video.created,
 				updated: video.updated,
 			},
