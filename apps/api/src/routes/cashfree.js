@@ -5,6 +5,7 @@ import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { getPaymentMethods } from '../utils/paymentMethods.js';
+import { cashfreeBaseUrl, cashfreeHeaders, cashfreeConfigured } from '../utils/cashfreeClient.js';
 
 const router = Router();
 
@@ -17,25 +18,8 @@ const cashfreeRateLimit = rateLimit({
 	validate: { trustProxy: false },
 });
 
-// PROD: https://api.cashfree.com/pg
-// SANDBOX: https://sandbox.cashfree.com/pg
-function cashfreeBaseUrl() {
-	const mode = (process.env.CASHFREE_ENV || 'sandbox').toLowerCase();
-	return mode === 'production' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg';
-}
-
-function cashfreeHeaders() {
-	return {
-		'Content-Type': 'application/json',
-		Accept: 'application/json',
-		'x-api-version': '2023-08-01',
-		'x-client-id': process.env.CASHFREE_APP_ID || '',
-		'x-client-secret': process.env.CASHFREE_SECRET_KEY || '',
-	};
-}
-
 function isConfigured() {
-	return Boolean(process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY);
+	return cashfreeConfigured();
 }
 
 /**

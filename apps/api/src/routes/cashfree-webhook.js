@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
+import { fetchCashfreeOrder } from '../utils/cashfreeClient.js';
 
 const router = Router();
 
@@ -56,7 +57,7 @@ router.post('/cashfree', async (req, res) => {
 	const order = data.order || {};
 	const paymentInfo = data.payment || {};
 	const orderId = order.order_id || data.order_id;
-	const orderTags = order.order_tags || data.order_tags || {};
+	let orderTags = order.order_tags || data.order_tags || {};
 	const paymentStatus = paymentInfo.payment_status || data.payment_status;
 
 	logger.info(
@@ -65,6 +66,24 @@ router.post('/cashfree', async (req, res) => {
 
 	try {
 		if (PAID_STATUSES.has(paymentStatus)) {
+			// Cashfree's PAYMENT_SUCCESS webhook does NOT reliably include
+			// order_tags. If they're missing, fetch the order from Cashfree's
+			// API (server-side source of truth) to recover user_id and
+			// credit_amount, and to confirm the order is actually PAID.
+			if (!orderTags?.user_id || !orderTags?.credit_amount) {
+				const fetched = await fetchCashfreeOrder(orderId);
+				if (fetched?.order_tags) {
+					orderTags = fetched.order_tags;
+				}
+				// Extra safety: only credit if Cashfree says the order is PAID.
+				if (fetched && fetched.order_status && fetched.order_status !== 'PAID') {
+					logger.warn(
+						`Cashfree webhook: order ${orderId} status is ${fetched.order_status}, not crediting`,
+					);
+					return res.status(200).json({ received: true });
+				}
+			}
+
 			await handlePaymentSuccess({
 				orderId,
 				orderTags,
@@ -89,7 +108,7 @@ async function handlePaymentSuccess({ orderId, orderTags, orderAmount, paymentIn
 
 	if (!userId || !Number.isFinite(creditAmount) || creditAmount <= 0) {
 		logger.warn(
-			`Cashfree webhook: missing/invalid order_tags for order ${orderId}: ${JSON.stringify(orderTags)}`,
+			`Cashfree webhook: missing/invalid order_tags for order ${orderId} (even after fetch): ${JSON.stringify(orderTags)}`,
 		);
 		return;
 	}
