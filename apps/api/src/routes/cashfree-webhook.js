@@ -18,7 +18,7 @@ const router = Router();
  * callback.
  */
 function verifySignature(timestamp, rawBody, providedSignature) {
-	const secret = process.env.CASHFREE_SECRET_KEY;
+	const secret = (process.env.CASHFREE_SECRET_KEY || '').trim();
 	if (!secret) return false;
 	if (!timestamp || !rawBody || !providedSignature) return false;
 
@@ -40,14 +40,20 @@ router.post('/cashfree', async (req, res) => {
 	const signature = req.header('x-webhook-signature');
 	const rawBody = req.rawBody; // captured in main.js
 
-	if (process.env.CASHFREE_SECRET_KEY) {
-		if (!verifySignature(timestamp, rawBody, signature)) {
-			logger.warn('Cashfree webhook: signature verification failed');
-			return res.status(401).json({ error: 'Invalid signature' });
-		}
-	} else {
+	const signatureValid = process.env.CASHFREE_SECRET_KEY
+		? verifySignature(timestamp, rawBody, signature)
+		: false;
+
+	if (!signatureValid) {
+		// Diagnostics (no secrets): helps explain why prod signatures fail
+		// (missing rawBody from a proxy, mangled secret, etc.). We do NOT
+		// reject here - instead we re-verify the order against Cashfree's
+		// API below, which is authoritative and immune to body mangling.
 		logger.warn(
-			'Cashfree webhook: CASHFREE_SECRET_KEY not set, skipping signature verification (dev only)',
+			`Cashfree webhook: signature not verified ` +
+			`(hasRawBody=${!!rawBody} len=${rawBody?.length || 0} ` +
+			`hasTs=${!!timestamp} hasSig=${!!signature}). ` +
+			`Falling back to Cashfree API verification.`,
 		);
 	}
 
@@ -74,27 +80,32 @@ router.post('/cashfree', async (req, res) => {
 	const paymentStatus = paymentInfo.payment_status || data.payment_status;
 
 	logger.info(
-		`Cashfree webhook: type=${eventType} order=${orderId} status=${paymentStatus}`,
+		`Cashfree webhook: type=${eventType} order=${orderId} status=${paymentStatus} sigValid=${signatureValid}`,
 	);
 
 	try {
-		if (PAID_STATUSES.has(paymentStatus)) {
-			// Cashfree's PAYMENT_SUCCESS webhook does NOT reliably include
-			// order_tags. If they're missing, fetch the order from Cashfree's
-			// API (server-side source of truth) to recover user_id and
-			// credit_amount, and to confirm the order is actually PAID.
-			if (!orderTags?.user_id || !orderTags?.credit_amount) {
+		const looksPaid = PAID_STATUSES.has(paymentStatus);
+
+		if (looksPaid) {
+			// Authoritative verification: unless we trust the signature AND
+			// already have the tags, fetch the order from Cashfree's API with
+			// our own credentials and confirm it is actually PAID. This makes
+			// crediting work even when the webhook signature can't be verified
+			// (proxy body mangling, env whitespace) without trusting an
+			// unauthenticated caller - an attacker cannot make Cashfree report
+			// an order as PAID unless it really was.
+			const haveTags = orderTags?.user_id && orderTags?.credit_amount;
+			if (!signatureValid || !haveTags) {
 				const fetched = await fetchCashfreeOrder(orderId);
-				if (fetched?.order_tags) {
-					orderTags = fetched.order_tags;
-				}
-				// Extra safety: only credit if Cashfree says the order is PAID.
-				if (fetched && fetched.order_status && fetched.order_status !== 'PAID') {
-					logger.warn(
-						`Cashfree webhook: order ${orderId} status is ${fetched.order_status}, not crediting`,
-					);
+				if (!fetched) {
+					logger.warn(`Cashfree webhook: could not fetch order ${orderId} for verification - skipping`);
 					return res.status(200).json({ received: true });
 				}
+				if (fetched.order_status !== 'PAID') {
+					logger.warn(`Cashfree webhook: order ${orderId} status=${fetched.order_status} (not PAID) - not crediting`);
+					return res.status(200).json({ received: true });
+				}
+				if (fetched.order_tags) orderTags = fetched.order_tags;
 			}
 
 			await handlePaymentSuccess({

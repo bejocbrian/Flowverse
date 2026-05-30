@@ -17,13 +17,16 @@ export function cashfreeHeaders() {
 		'Content-Type': 'application/json',
 		Accept: 'application/json',
 		'x-api-version': '2023-08-01',
-		'x-client-id': process.env.CASHFREE_APP_ID || '',
-		'x-client-secret': process.env.CASHFREE_SECRET_KEY || '',
+		'x-client-id': (process.env.CASHFREE_APP_ID || '').trim(),
+		'x-client-secret': (process.env.CASHFREE_SECRET_KEY || '').trim(),
 	};
 }
 
 export function cashfreeConfigured() {
-	return Boolean(process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY);
+	return Boolean(
+		(process.env.CASHFREE_APP_ID || '').trim() &&
+		(process.env.CASHFREE_SECRET_KEY || '').trim(),
+	);
 }
 
 /**
