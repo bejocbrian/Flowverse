@@ -146,11 +146,23 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (updates) => {
     try {
-      const updated = await pb.collection('users').update(currentUser.id, updates, { $autoCancel: false });
-      // Persist back into the authStore so a hard reload picks up the
-      // new field values (otherwise authStore.model is whatever was
-      // there at login time and the user looks unchanged after reload).
-      pb.authStore.save(pb.authStore.token, updated);
+      // Route writes through our API (never talk to PocketBase directly
+      // from the browser). The API whitelists the allowed fields.
+      const response = await apiServerClient.fetch('/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update profile');
+      }
+      const { user: updated } = await response.json();
+      // Keep the local PocketBase authStore in sync so any PB-based reads
+      // and a hard reload reflect the new values.
+      if (pb.authStore.token) {
+        pb.authStore.save(pb.authStore.token, { ...pb.authStore.model, ...updated });
+      }
       setCurrentUser(updated);
       setRole(updated.role || 'consumer');
       return updated;
@@ -162,8 +174,15 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = async () => {
     try {
-      const updated = await pb.collection('users').getOne(currentUser.id, { $autoCancel: false });
-      pb.authStore.save(pb.authStore.token, updated);
+      const response = await apiServerClient.fetch('/users/me');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to refresh user');
+      }
+      const { user: updated } = await response.json();
+      if (pb.authStore.token) {
+        pb.authStore.save(pb.authStore.token, { ...pb.authStore.model, ...updated });
+      }
       setCurrentUser(updated);
       setRole(updated.role || 'consumer');
       return updated;
