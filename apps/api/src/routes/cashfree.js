@@ -6,6 +6,7 @@ import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { getPaymentMethods } from '../utils/paymentMethods.js';
 import { cashfreeBaseUrl, cashfreeHeaders, cashfreeConfigured } from '../utils/cashfreeClient.js';
+import { creditCashfreeOrder } from '../utils/creditOrder.js';
 
 const router = Router();
 
@@ -175,6 +176,18 @@ router.get('/order/:orderId', async (req, res) => {
 		// Authorization: only let the user who created the order see it.
 		if (cfData?.order_tags?.user_id && cfData.order_tags.user_id !== req.pocketbaseUserId) {
 			return res.status(403).json({ error: 'Not your order' });
+		}
+
+		// Credit-on-return: if this order is PAID, credit the user now. This
+		// is the reliable path - it does not depend on the webhook arriving
+		// or its signature verifying. Idempotent: if the webhook already
+		// credited (or this runs twice), it's a no-op.
+		if (cfData?.order_status === 'PAID') {
+			try {
+				await creditCashfreeOrder(orderId, { knownOrder: cfData });
+			} catch (creditErr) {
+				logger.error(`Credit-on-return failed for ${orderId}: ${creditErr.message}`);
+			}
 		}
 
 		res.json({
