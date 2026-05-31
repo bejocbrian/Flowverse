@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import Pocketbase from 'pocketbase';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { isDisposableEmail } from '../utils/disposableEmails.js';
@@ -8,6 +9,22 @@ import { verifyTurnstile } from '../utils/turnstile.js';
 const router = Router();
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const POCKETBASE_HOST = process.env.POCKETBASE_URL || 'http://localhost:8090';
+
+// Build a throwaway PocketBase client for end-user authentication
+// (authWithPassword / requestPasswordReset). These calls save the
+// authenticated principal's token into the client's authStore. Running them
+// on the shared superuser client (`pb`) would overwrite its superuser token
+// with a regular user's token, downgrading every subsequent superuser-only
+// operation (e.g. creating user records) and breaking signup/login after the
+// first request. A fresh client per request keeps the superuser session
+// isolated. This mirrors the pattern in middleware/pocketbase-auth.js.
+function newUserClient() {
+	const client = new Pocketbase(POCKETBASE_HOST);
+	client.autoCancellation(false);
+	return client;
+}
 
 // Strict rate limits. The global limiter still applies on top of these.
 const signupLimiter = rateLimit({
@@ -93,7 +110,7 @@ router.post('/signup', signupLimiter, async (req, res) => {
 	}
 
 	try {
-		await pb.collection('users').create({
+		const created = await pb.collection('users').create({
 			email,
 			password,
 			passwordConfirm: password,
@@ -107,7 +124,11 @@ router.post('/signup', signupLimiter, async (req, res) => {
 			initial_credits_granted: true,
 		});
 
-		const authData = await pb.collection('users').authWithPassword(email, password);
+		// Authenticate on a throwaway client so we don't clobber the shared
+		// superuser client's auth state (see newUserClient).
+		const authData = await newUserClient()
+			.collection('users')
+			.authWithPassword(email, password);
 
 		logger.info(`User signed up: ${authData.record.id}`);
 
@@ -169,7 +190,11 @@ router.post('/login', loginLimiter, async (req, res) => {
 	}
 
 	try {
-		const authData = await pb.collection('users').authWithPassword(email, password);
+		// Authenticate on a throwaway client so we don't clobber the shared
+		// superuser client's auth state (see newUserClient).
+		const authData = await newUserClient()
+			.collection('users')
+			.authWithPassword(email, password);
 
 		// Reject banned users. We check after authWithPassword so that the
 		// timing of "wrong password" vs "banned" is identical: both come
@@ -226,7 +251,7 @@ router.post('/reset-password', passwordResetLimiter, async (req, res) => {
 	}
 
 	try {
-		await pb.collection('users').requestPasswordReset(email);
+		await newUserClient().collection('users').requestPasswordReset(email);
 	} catch (error) {
 		// Swallow errors so we don't leak whether an email is registered.
 		logger.warn('Password reset attempt error (suppressed):', error.message);
