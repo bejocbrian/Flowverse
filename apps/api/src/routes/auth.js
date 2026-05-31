@@ -120,7 +120,8 @@ router.post('/signup', signupLimiter, async (req, res) => {
 			// directly at signup. `initial_credits_granted=true` keeps the
 			// pb_hooks/grant-initial-credits.pb.js hook from double-granting if
 			// verification is ever re-enabled.
-			credits_balance: 50,
+			// 80 display credits ≈ 5 Veo 3.1 Fast videos (15 cr each).
+			credits_balance: 80,
 			initial_credits_granted: true,
 		});
 

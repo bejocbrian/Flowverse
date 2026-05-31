@@ -148,3 +148,22 @@ export function validateCatalog() {
 
 // Re-export so callers can resolve a variant's resolution set consistently.
 export { variantResolutions };
+
+/**
+ * The lowest per-video credit cost among enabled, routed video models. Used by
+ * the wallet to show "≈ N videos" for each credit pack so buyers understand
+ * what a pack gets them. We use the CHEAPEST model so the figure is an
+ * optimistic-but-honest "up to N videos" (cheaper model => more videos).
+ *
+ * Returns a positive integer, or null if no per_video model is enabled.
+ */
+export function cheapestVideoCost() {
+	let min = Infinity;
+	for (const v of MODEL_VARIANTS) {
+		if (!v.enabled || v.type !== 'video' || v.billing !== 'per_video') continue;
+		for (const rate of Object.values(v.credits || {})) {
+			if (typeof rate === 'number' && rate > 0 && rate < min) min = rate;
+		}
+	}
+	return Number.isFinite(min) ? min : null;
+}

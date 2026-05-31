@@ -8,6 +8,7 @@ import { getPaymentMethods } from '../utils/paymentMethods.js';
 import { cashfreeBaseUrl, cashfreeHeaders, cashfreeConfigured } from '../utils/cashfreeClient.js';
 import { creditCashfreeOrder } from '../utils/creditOrder.js';
 import { CREDIT_PACKS, getCreditPack } from '../constants/creditPacks.js';
+import { cheapestVideoCost } from '../utils/creditCalculator.js';
 
 const router = Router();
 
@@ -26,8 +27,10 @@ function isConfigured() {
 
 // GET /cashfree/packs - public list of credit packs for the wallet UI.
 // The wallet renders from this so price/credits always match the server.
+// `videoUnitCredits` is the cheapest per-video cost so the UI can show how
+// many videos each pack is worth.
 router.get('/packs', (_req, res) => {
-	res.json({ packs: CREDIT_PACKS, currency: 'INR' });
+	res.json({ packs: CREDIT_PACKS, currency: 'INR', videoUnitCredits: cheapestVideoCost() });
 });
 
 /**

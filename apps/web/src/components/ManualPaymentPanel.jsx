@@ -30,7 +30,7 @@ const UPI_PAYEE = 'AiSlopClub';
 // a friendly fallback instead of a broken image.
 const QR_SRC = '/payment-qr.png';
 
-const ManualPaymentPanel = ({ packs = [] }) => {
+const ManualPaymentPanel = ({ packs = [], videoUnitCredits = null }) => {
 	const [qrOk, setQrOk] = useState(true);
 
 	const waMessage = encodeURIComponent(
@@ -119,26 +119,42 @@ const ManualPaymentPanel = ({ packs = [] }) => {
 								Credit packs
 							</p>
 							<ul className="divide-y divide-white/5 border border-white/10 rounded-xl overflow-hidden">
-								{packs.map((pack) => (
-									<li
-										key={pack.id}
-										className="flex items-center justify-between px-4 py-2.5 text-sm"
-									>
-										<span className="capitalize text-white/80">
-											{pack.id}
-											{pack.badge && (
-												<span className="ml-2 text-[10px] font-mono uppercase text-[hsl(var(--accent-primary))]">
-													{pack.badge}
-												</span>
-											)}
-										</span>
-										<span className="text-white/60">
-											<span className="font-semibold text-white">{pack.credits}</span> credits
-										</span>
-										<span className="font-semibold">₹{pack.priceINR}</span>
-									</li>
-								))}
+								{packs.map((pack) => {
+									const videos =
+										videoUnitCredits && videoUnitCredits > 0
+											? Math.floor(pack.credits / videoUnitCredits)
+											: null;
+									return (
+										<li
+											key={pack.id}
+											className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm"
+										>
+											<span className="capitalize text-white/80 flex-1 min-w-0">
+												{pack.id}
+												{pack.badge && (
+													<span className="ml-2 text-[10px] font-mono uppercase text-[hsl(var(--accent-primary))]">
+														{pack.badge}
+													</span>
+												)}
+											</span>
+											<span className="text-white/60 text-right whitespace-nowrap">
+												<span className="font-semibold text-white">{pack.credits}</span> cr
+												{videos != null && (
+													<span className="block text-[11px] text-white/40">
+														≈ {videos} videos
+													</span>
+												)}
+											</span>
+											<span className="font-semibold w-14 text-right">₹{pack.priceINR}</span>
+										</li>
+									);
+								})}
 							</ul>
+							{videoUnitCredits && (
+								<p className="text-[11px] text-white/30 mt-2">
+									Video estimate is based on our most affordable model; premium models use more credits.
+								</p>
+							)}
 						</div>
 					)}
 				</div>

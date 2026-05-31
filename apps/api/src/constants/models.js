@@ -1,10 +1,19 @@
 /**
  * Single source of truth for the model catalog AND its pricing.
  *
- * Pricing model: catalog-driven, unit-aware, 1:1 vendor pass-through.
- *   - catalog credits == what the user is charged == the vendor's credit cost
- *   - the rupee markup lives in the wallet layer (1 credit = ₹1.50 to the
- *     user; our vendor cost is ₹0.556), NOT here.
+ * Pricing model: catalog-driven, unit-aware. Catalog credits are denominated
+ * in OUR internal "display credits", which are deliberately DECOUPLED from the
+ * vendor's raw credit cost so the UI never reveals supplier pricing.
+ *
+ *   display credits == what the user is charged == vendor credits * K
+ *
+ * where K = CREDIT_DISPLAY_MULTIPLIER (currently 5). The rupee markup lives in
+ * the wallet layer (credit packs), and K only changes the numbers shown to
+ * users - it does NOT affect margin (pack ₹ prices are set independently).
+ *
+ * IMPORTANT: vendor calls (apps/api/src/api/geminigen.js) never send our credit
+ * numbers, so scaling the catalog is safe - it only affects what we charge the
+ * user and display in the picker.
  *
  * Each variant declares its billing unit:
  *   billing: 'per_video'  -> flat charge, duration ignored.
@@ -29,6 +38,9 @@
  * The catalog is validated at startup (see validateCatalog); a misconfigured
  * entry (per_video without credits, per_second without creditsPerSecond, etc.)
  * crashes the server fast rather than silently charging 0.
+ *
+ * All credit values below already include the K=5 display multiplier (e.g. a
+ * model that costs the vendor 3 credits is listed as 15).
  */
 
 export const MODEL_VARIANTS = [
@@ -43,7 +55,7 @@ export const MODEL_VARIANTS = [
 		provider: 'xAI',
 		type: 'video',
 		billing: 'per_video',
-		credits: { default: 4 },
+		credits: { default: 25 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
@@ -56,7 +68,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 3 },
+		credits: { '720p': 15 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
@@ -69,7 +81,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '1080p': 3 },
+		credits: { '1080p': 15 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
@@ -82,7 +94,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 3 },
+		credits: { '720p': 15 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
@@ -95,12 +107,16 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '1080p': 3 },
+		credits: { '1080p': 15 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
 		enabled: true,
 	},
+	/* TEMPORARILY HIDDEN: Veo 2 is an older model priced higher than the newer
+	 * Veo 3.1 Fast/Lite, which confuses buyers. Commented out of the picker for
+	 * now; re-enable later if we want to offer it. Display cost was 100 credits
+	 * (K=5; vendor cost 20). Kept here so pricing/routing context isn't lost.
 	{
 		key: 'veo-2',
 		id: 'veo-2',
@@ -108,12 +124,13 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 20, '1080p': 20 },
+		credits: { '720p': 100, '1080p': 100 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
 		enabled: true,
 	},
+	*/
 	{
 		key: 'veo-3.1-hd',
 		id: 'veo-3.1',
@@ -121,7 +138,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 100, '1080p': 100 },
+		credits: { '720p': 500, '1080p': 500 },
 		maxDuration: 8,
 		durations: [4, 6, 8],
 		routed: true,
@@ -139,7 +156,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 3 },
+		creditsPerSecond: { '720p': 15 },
 		durations: [5, 10],
 		routed: false,
 		enabled: false,
@@ -151,7 +168,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 6, '1080p': 8 },
+		creditsPerSecond: { '720p': 30, '1080p': 40 },
 		durations: [5, 10],
 		routed: false,
 		enabled: false,
@@ -163,7 +180,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 6, '1080p': 10 },
+		creditsPerSecond: { '720p': 30, '1080p': 50 },
 		durations: [5, 10],
 		routed: false,
 		enabled: false,
@@ -175,7 +192,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '1080p': 14 },
+		creditsPerSecond: { '1080p': 70 },
 		durations: [5, 10],
 		routed: false,
 		enabled: false,
@@ -187,7 +204,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 6, '1080p': 12 },
+		creditsPerSecond: { '720p': 30, '1080p': 60 },
 		durations: [10],
 		routed: false,
 		enabled: false,
@@ -199,7 +216,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 7, '1080p': 12 },
+		creditsPerSecond: { '720p': 35, '1080p': 60 },
 		durations: [5],
 		routed: false,
 		enabled: false,
@@ -211,7 +228,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 10, '1080p': 12 },
+		creditsPerSecond: { '720p': 50, '1080p': 60 },
 		minDuration: 3,
 		maxDuration: 15,
 		routed: false,
@@ -224,7 +241,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 12, '1080p': 15 },
+		creditsPerSecond: { '720p': 60, '1080p': 75 },
 		minDuration: 3,
 		maxDuration: 10,
 		routed: false,
@@ -237,7 +254,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 10, '1080p': 12 },
+		creditsPerSecond: { '720p': 50, '1080p': 60 },
 		minDuration: 3,
 		maxDuration: 10,
 		routed: false,
@@ -250,7 +267,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 10, '1080p': 16 },
+		creditsPerSecond: { '720p': 50, '1080p': 80 },
 		// NOTE: durations assumed (vendor page unreadable); confirm.
 		minDuration: 3,
 		maxDuration: 15,
@@ -264,7 +281,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 6, '1080p': 9 },
+		creditsPerSecond: { '720p': 30, '1080p': 45 },
 		// NOTE: durations assumed (vendor page unreadable); confirm.
 		durations: [5, 10],
 		routed: false,
@@ -277,7 +294,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Kling',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 6, '1080p': 6 },
+		creditsPerSecond: { '720p': 30, '1080p': 30 },
 		// NOTE: durations assumed (vendor page unreadable); confirm.
 		durations: [5, 10],
 		routed: false,
@@ -290,7 +307,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '480p': 12, '720p': 19 },
+		creditsPerSecond: { '480p': 60, '720p': 95 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,
@@ -303,7 +320,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '480p': 16, '720p': 27 },
+		creditsPerSecond: { '480p': 80, '720p': 135 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,
@@ -316,7 +333,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 19 },
+		creditsPerSecond: { '720p': 95 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,
@@ -329,7 +346,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 27 },
+		creditsPerSecond: { '720p': 135 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,
@@ -342,7 +359,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 27 },
+		creditsPerSecond: { '720p': 135 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,
@@ -355,7 +372,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Seedance',
 		type: 'video',
 		billing: 'per_second',
-		creditsPerSecond: { '720p': 35 },
+		creditsPerSecond: { '720p': 175 },
 		minDuration: 4,
 		maxDuration: 15,
 		routed: false,

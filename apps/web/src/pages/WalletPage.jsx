@@ -71,6 +71,8 @@ const WalletPage = () => {
 	const [loading, setLoading] = useState(true);
 	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
 	const [packs, setPacks] = useState([]);
+	// Cheapest per-video credit cost, used to show "≈ N videos" per pack.
+	const [videoUnitCredits, setVideoUnitCredits] = useState(null);
 
 	useEffect(() => {
 		// Load credit packs from the server (authoritative price + credits).
@@ -86,6 +88,9 @@ const WalletPage = () => {
 					const data = await res.json();
 					if (!cancelled && Array.isArray(data.packs) && data.packs.length) {
 						setPacks(data.packs);
+						if (typeof data.videoUnitCredits === 'number') {
+							setVideoUnitCredits(data.videoUnitCredits);
+						}
 						return;
 					}
 				} catch {
@@ -228,7 +233,7 @@ const WalletPage = () => {
 						 * follows it. No other changes needed - the gateway components and
 						 * server routes are still in place.
 						 */
-						<ManualPaymentPanel packs={packs} />
+						<ManualPaymentPanel packs={packs} videoUnitCredits={videoUnitCredits} />
 					) : /* ---------- AUTOMATED CHECKOUT (disabled, keep for restore) ----------
 					tab === 'buy' ? (
 						(() => {

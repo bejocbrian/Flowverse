@@ -18,6 +18,7 @@ import {
 } from '../utils/paytmClient.js';
 import { creditPaytmOrder } from '../utils/creditOrder.js';
 import { CREDIT_PACKS, getCreditPack } from '../constants/creditPacks.js';
+import { cheapestVideoCost } from '../utils/creditCalculator.js';
 
 const router = Router();
 
@@ -32,8 +33,10 @@ const paytmRateLimit = rateLimit({
 
 // GET /paytm/packs - public list of credit packs for the wallet UI.
 // Mirrors /cashfree/packs so the wallet renders identical pricing.
+// `videoUnitCredits` is the cheapest per-video cost so the UI can show how
+// many videos each pack is worth.
 router.get('/packs', (_req, res) => {
-	res.json({ packs: CREDIT_PACKS, currency: 'INR' });
+	res.json({ packs: CREDIT_PACKS, currency: 'INR', videoUnitCredits: cheapestVideoCost() });
 });
 
 // GET /paytm/config - non-secret values the frontend SDK needs to render the
