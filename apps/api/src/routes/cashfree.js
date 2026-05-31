@@ -7,6 +7,7 @@ import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { getPaymentMethods } from '../utils/paymentMethods.js';
 import { cashfreeBaseUrl, cashfreeHeaders, cashfreeConfigured } from '../utils/cashfreeClient.js';
 import { creditCashfreeOrder } from '../utils/creditOrder.js';
+import { CREDIT_PACKS, getCreditPack } from '../constants/creditPacks.js';
 
 const router = Router();
 
@@ -22,6 +23,12 @@ const cashfreeRateLimit = rateLimit({
 function isConfigured() {
 	return cashfreeConfigured();
 }
+
+// GET /cashfree/packs - public list of credit packs for the wallet UI.
+// The wallet renders from this so price/credits always match the server.
+router.get('/packs', (_req, res) => {
+	res.json({ packs: CREDIT_PACKS, currency: 'INR' });
+});
 
 /**
  * POST /cashfree/create-order
@@ -41,19 +48,21 @@ router.post('/create-order', cashfreeRateLimit, async (req, res) => {
 		return res.status(503).json({ error: 'Cashfree is not configured on the server' });
 	}
 
-	const { creditAmount, price, currency = 'INR', successUrl } = req.body || {};
+	const { packId, currency = 'INR', successUrl } = req.body || {};
 
-	if (!creditAmount || !price || !successUrl) {
-		return res
-			.status(400)
-			.json({ error: 'creditAmount, price, and successUrl are required' });
+	if (!packId || !successUrl) {
+		return res.status(400).json({ error: 'packId and successUrl are required' });
 	}
-	if (typeof price !== 'number' || price <= 0) {
-		return res.status(400).json({ error: 'price must be a positive number' });
+
+	// SECURITY: price and credits come from the server-side pack table, never
+	// from the client. A user can only pick a pack id; they cannot set their
+	// own price or credit amount.
+	const pack = getCreditPack(packId);
+	if (!pack) {
+		return res.status(400).json({ error: 'Unknown credit pack' });
 	}
-	if (typeof creditAmount !== 'number' || creditAmount <= 0) {
-		return res.status(400).json({ error: 'creditAmount must be a positive number' });
-	}
+	const price = pack.priceINR;
+	const creditAmount = pack.credits;
 
 	const userId = req.pocketbaseUserId;
 	if (!userId) {
@@ -91,9 +100,10 @@ router.post('/create-order', cashfreeRateLimit, async (req, res) => {
 			order_tags: {
 				user_id: userId,
 				credit_amount: String(creditAmount),
+				pack_id: pack.id,
 				source: 'aether-video',
 			},
-			order_note: `Aether credits: ${creditAmount}`,
+			order_note: `Aether ${pack.id}: ${creditAmount} credits`,
 		};
 
 		let cfResponse;

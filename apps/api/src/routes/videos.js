@@ -4,7 +4,8 @@ import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
-import { calculateCreditCost, getAllModelCosts, getModelCreditCost } from '../utils/creditCalculator.js';
+import { creditCost as computeCreditCost, variantPricingDisplay } from '../utils/creditCalculator.js';
+import { getEnabledModels } from '../constants/models.js';
 import { withTransaction, refundCredits } from '../utils/dbTransaction.js';
 import { processGeneration } from '../workers/generationProcessor.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
@@ -12,18 +13,15 @@ import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit
 
 const router = Router();
 
-// GET /videos/credit-costs - Get all model credit costs (public endpoint)
-router.get('/credit-costs', async (req, res) => {
+// GET /videos/credit-costs - Per-model pricing for the picker (public).
+// Catalog-driven; same data /models returns. Kept for backwards compat.
+router.get('/credit-costs', async (_req, res) => {
 	try {
-		const costs = getAllModelCosts();
-		res.json({
-			creditsPerSecond: 2,
-			qualityMultipliers: {
-				'720p': 1,
-				'1080p': 1.5,
-			},
-			modelCosts: costs,
-		});
+		const modelCosts = {};
+		for (const v of getEnabledModels()) {
+			modelCosts[v.key] = { billing: v.billing, ...variantPricingDisplay(v) };
+		}
+		res.json({ modelCosts });
 	} catch (error) {
 		logger.error('Fetch credit costs error:', error.message);
 		res.status(500).json({ error: 'Failed to fetch credit costs' });
@@ -74,7 +72,7 @@ router.get('/', async (req, res) => {
 
 // POST /videos - Create video/image generation request and submit to GeminiGen
 router.post('/', freeUserGenerationRateLimit, async (req, res) => {
-	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, output_type, idempotency_key } = req.body;
+	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, model_key, output_type, idempotency_key } = req.body;
 
 	if (!prompt || !provider || !model) {
 		return res.status(400).json({ error: 'prompt, provider, and model are required' });
@@ -120,7 +118,35 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	}
 
 	const isImage = output_type === 'image';
-	const creditCost = calculateCreditCost({ quality, duration, isImage, model });
+
+	// Resolve the catalog variant. The picker sends `model_key`; older clients
+	// may only send `model` (the vendor id) - fall back to the first enabled
+	// variant with that id. Server is authoritative: only enabled+routed
+	// models can be generated, and pricing comes from the catalog (never the
+	// client), so a user can't select a disabled model or spoof a price.
+	const enabled = getEnabledModels();
+	let variant = null;
+	if (model_key) {
+		variant = enabled.find((m) => m.key === model_key) || null;
+	}
+	if (!variant) {
+		variant = enabled.find((m) => m.id === model) || null;
+	}
+	if (!variant) {
+		return res.status(400).json({ error: 'Unknown or unavailable model' });
+	}
+
+	let creditCost;
+	try {
+		creditCost = computeCreditCost({
+			modelKey: variant.key,
+			resolution: quality,
+			duration,
+		});
+	} catch (priceErr) {
+		logger.error(`Pricing error for ${variant.key}: ${priceErr.message}`);
+		return res.status(400).json({ error: 'Could not price this generation' });
+	}
 
 	// Anti-abuse: enforce a rolling 24h cap on how many generations a user can
 	// submit. Placed AFTER the idempotency replay check above, so genuine

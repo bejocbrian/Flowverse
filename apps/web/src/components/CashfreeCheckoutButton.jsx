@@ -16,7 +16,7 @@ async function loadCashfree(mode) {
 	return factory({ mode: resolvedMode });
 }
 
-const CashfreeCheckoutButton = ({ creditAmount, price, popular, currency = 'INR', mode, className }) => {
+const CashfreeCheckoutButton = ({ packId, popular, mode, className, children }) => {
 	const [loading, setLoading] = useState(false);
 
 	const handleCheckout = async () => {
@@ -25,10 +25,12 @@ const CashfreeCheckoutButton = ({ creditAmount, price, popular, currency = 'INR'
 			const successUrl =
 				`${window.location.origin}/app/wallet/success?cf_order_id={order_id}`;
 
+			// Server-authoritative: we send only the pack id. Price and credits
+			// are derived from the server's pack table - never trusted from here.
 			const res = await apiServerClient.fetch('/cashfree/create-order', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ creditAmount, price, currency, successUrl }),
+				body: JSON.stringify({ packId, currency: 'INR', successUrl }),
 			});
 
 			if (!res.ok) {
@@ -67,7 +69,7 @@ const CashfreeCheckoutButton = ({ creditAmount, price, popular, currency = 'INR'
 					Processing...
 				</>
 			) : (
-				'Pay with Cashfree'
+				children || 'Pay with Cashfree'
 			)}
 		</Button>
 	);

@@ -6,6 +6,8 @@ import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { generateVideo, generateImage } from '../api/geminigen.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
+import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
+import { getEnabledModels } from '../constants/models.js';
 
 const router = Router();
 
@@ -90,7 +92,19 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 				if (varyQuality) quality = varyQuality;
 			}
 
-			const creditCost = calculateCreditCost(quality, duration, isImage);
+			const creditCost = (() => {
+				// Resolve the catalog variant from the original video's vendor
+				// id + resolution, then price via the single shared calculator.
+				const enabled = getEnabledModels();
+				const variant =
+					enabled.find((m) => m.id === video.model && (m.credits?.[quality] != null || m.creditsPerSecond?.[quality] != null)) ||
+					enabled.find((m) => m.id === video.model) ||
+					null;
+				if (!variant) {
+					throw new Error('Unknown or unavailable model for regeneration');
+				}
+				return computeCreditCost({ modelKey: variant.key, resolution: quality, duration });
+			})();
 
 			if (user.credits_balance < creditCost) {
 				return res.status(400).json({ error: 'Insufficient credits for all variations' });
@@ -224,21 +238,6 @@ async function submitToGeminiGen(videoRecord, isImage) {
 			logger.error('Regen refund error:', refundError.message);
 		}
 	}
-}
-
-function calculateCreditCost(quality, duration, isImage = false) {
-	if (isImage) {
-		return { '720p': 5, '1080p': 10, '1K': 5, '2K': 10 }[quality] || 5;
-	}
-
-	const qualityMultiplier = {
-		'720p': 1, '1080p': 1.5,
-		standard: 1, high: 1.5, premium: 2,
-		'Standard': 1, 'Fast': 0.8, 'High': 1.5,
-	}[quality] || 1;
-
-	const durationCost = (duration || 5) * 2;
-	return Math.ceil(durationCost * qualityMultiplier);
 }
 
 export default router;

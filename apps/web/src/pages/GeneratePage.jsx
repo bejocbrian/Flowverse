@@ -173,8 +173,11 @@ const SettingsPanel = ({
 						<div className="flex flex-col gap-1">
 							{models.map((m) => {
 								const active = m.key === selectedModelKey;
-								const minCr = m.credits ? Math.min(...Object.values(m.credits)) : null;
-								const maxCr = m.credits ? Math.max(...Object.values(m.credits)) : null;
+								const priceMap = m.billing === 'per_second' ? m.creditsPerSecond : m.credits;
+								const vals = priceMap ? Object.values(priceMap) : [];
+								const minCr = vals.length ? Math.min(...vals) : null;
+								const maxCr = vals.length ? Math.max(...vals) : null;
+								const unit = m.billing === 'per_second' ? ' cr/s' : ' cr';
 								return (
 									<button
 										key={m.key}
@@ -194,7 +197,7 @@ const SettingsPanel = ({
 										<span className="flex items-center gap-2 shrink-0">
 											{minCr !== null && (
 												<span className="text-[10px] font-mono text-white/40 whitespace-nowrap">
-													{minCr === maxCr ? `${minCr}` : `${minCr}–${maxCr}`} cr
+													{minCr === maxCr ? `${minCr}` : `${minCr}–${maxCr}`}{unit}
 												</span>
 											)}
 											{active && <Check className="w-4 h-4 text-white" />}
@@ -217,7 +220,11 @@ const SettingsPanel = ({
 			>
 				<span className="flex items-center gap-2">
 					<Coins className="w-4 h-4" />
-					{insufficient ? 'Not enough credits' : 'Cost per generation'}
+					{insufficient
+						? 'Not enough credits'
+						: selectedModel?.billing === 'per_second'
+						? `≈ ${creditCost} cr for ${duration}s`
+						: 'Cost per generation'}
 				</span>
 				<span className="font-mono font-medium">
 					{creditCost} / {balance}
@@ -310,7 +317,17 @@ const GeneratePage = () => {
 		}
 	}, [selectedModel, resolution, duration]);
 
-	const creditCost = selectedModel?.credits?.[resolution] ?? 0;
+	const creditCost = useMemo(() => {
+		if (!selectedModel) return 0;
+		if (selectedModel.billing === 'per_second') {
+			const rate = selectedModel.creditsPerSecond?.[resolution];
+			if (!rate || !duration) return 0;
+			return Math.ceil(rate * duration); // matches server: ceil(rate × duration)
+		}
+		// per_video / per_image: flat per resolution
+		const map = selectedModel.credits || {};
+		return map[resolution] ?? map.default ?? 0;
+	}, [selectedModel, resolution, duration]);
 	const balance = currentUser?.credits_balance ?? 0;
 	const insufficient = balance < creditCost;
 	const promptOk = prompt.trim().length >= 3;
@@ -390,6 +407,7 @@ const GeneratePage = () => {
 					quality: resolution,
 					provider: selectedModel.provider,
 					model: selectedModel.id,
+					model_key: selectedModel.key,
 					output_type: 'video',
 					idempotency_key: idempotencyKey,
 				}),

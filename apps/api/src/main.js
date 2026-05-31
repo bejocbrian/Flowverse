@@ -10,6 +10,17 @@ import { errorMiddleware } from './middleware/error.js';
 import { globalRateLimit } from './middleware/global-rate-limit.js';
 import logger from './utils/logger.js';
 import { BodyLimit } from './constants/common.js';
+import { validateCatalog } from './utils/creditCalculator.js';
+
+// Fail fast: a mispriced or misconfigured model variant must crash the server
+// at boot rather than silently charge 0 or 404 a generation in production.
+try {
+	validateCatalog();
+	logger.info('Model catalog validated');
+} catch (err) {
+	logger.error('Model catalog validation failed:', err.message);
+	throw err;
+}
 
 const app = express();
 

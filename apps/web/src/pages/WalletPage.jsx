@@ -16,23 +16,11 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
-import StripeCheckoutButton from '@/components/StripeCheckoutButton.jsx';
 import CashfreeCheckoutButton from '@/components/CashfreeCheckoutButton.jsx';
 import usePublicSettings from '@/hooks/usePublicSettings.js';
 
-const STRIPE_PACKAGES = [
-	{ credits: 50, price: 4.99, popular: false, label: 'Starter' },
-	{ credits: 100, price: 8.99, popular: true, label: 'Standard' },
-	{ credits: 500, price: 39.99, popular: false, label: 'Studio' },
-];
-
-// Cashfree primarily settles in INR. Approximate INR pricing in line with
-// the Stripe USD packs above; admins can later move these to settings.
-const CASHFREE_PACKAGES = [
-	{ credits: 50, price: 399, popular: false, label: 'Starter' },
-	{ credits: 100, price: 749, popular: true, label: 'Standard' },
-	{ credits: 500, price: 3299, popular: false, label: 'Studio' },
-];
+// Credit packs are loaded from the server (/cashfree/packs) so price and
+// credits always match what the server will charge. No hardcoded prices here.
 
 /* -------------------------------------------------------------------------- */
 /*  Transaction utilities                                                     */
@@ -81,14 +69,25 @@ const WalletPage = () => {
 	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
 	const { settings: publicSettings } = usePublicSettings();
 	const paymentMethods = publicSettings.payment_methods;
-	const [provider, setProvider] = useState('stripe'); // 'stripe' | 'cashfree'
+	const [packs, setPacks] = useState([]);
 
 	useEffect(() => {
-		// Pick the first enabled provider as the default. If the admin only
-		// enabled one, the picker collapses naturally below.
-		if (!paymentMethods.stripe && paymentMethods.cashfree) setProvider('cashfree');
-		else if (paymentMethods.stripe) setProvider('stripe');
-	}, [paymentMethods]);
+		// Load credit packs from the server (authoritative price + credits).
+		let cancelled = false;
+		(async () => {
+			try {
+				const res = await apiServerClient.fetch('/cashfree/packs');
+				if (!res.ok) return;
+				const data = await res.json();
+				if (!cancelled) setPacks(Array.isArray(data.packs) ? data.packs : []);
+			} catch {
+				/* non-fatal: buy tab shows an empty state */
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -225,87 +224,73 @@ const WalletPage = () => {
 								);
 							}
 
-							const showSwitch = stripeOn && cashfreeOn;
-							const usingCashfree = provider === 'cashfree' && cashfreeOn;
-							const packages = usingCashfree ? CASHFREE_PACKAGES : STRIPE_PACKAGES;
-							const currencySymbol = usingCashfree ? '₹' : '$';
+							if (!cashfreeOn) {
+								// Stripe-only fallback isn't wired to the server pack
+								// table yet; Cashfree (INR) is the production path.
+								return (
+									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
+										<h2 className="text-lg font-semibold mb-1">Card checkout unavailable</h2>
+										<p className="text-sm text-white/50">
+											Please use UPI / cards (INR) checkout, or try again later.
+										</p>
+									</div>
+								);
+							}
+
+							if (packs.length === 0) {
+								return (
+									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
+										<Loader2 className="w-6 h-6 animate-spin text-white/40" />
+									</div>
+								);
+							}
 
 							return (
-								<>
-									{showSwitch && (
-										<div className="flex gap-1 p-1 rounded-full border border-white/10 bg-white/[0.03] w-fit mb-5">
-											<button
-												onClick={() => setProvider('stripe')}
-												className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-													provider === 'stripe' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
-												}`}
-											>
-												Card (USD)
-											</button>
-											<button
-												onClick={() => setProvider('cashfree')}
-												className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-													provider === 'cashfree' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
-												}`}
-											>
-												UPI / Cards (INR)
-											</button>
-										</div>
-									)}
-
-									<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-										{packages.map((pkg) => (
+								<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+									{packs.map((pack) => {
+										const popular = Boolean(pack.badge);
+										const perCredit = (pack.priceINR / pack.credits).toFixed(2);
+										return (
 											<motion.div
-												key={`${usingCashfree ? 'cf' : 'stripe'}-${pkg.credits}`}
+												key={pack.id}
 												initial={{ opacity: 0, y: 12 }}
 												whileInView={{ opacity: 1, y: 0 }}
 												viewport={{ once: true }}
 												className={`relative bg-white/[0.03] border rounded-2xl p-7 flex flex-col ${
-													pkg.popular
+													popular
 														? 'border-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
 														: 'border-white/10'
 												}`}
 											>
-												{pkg.popular && (
-													<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white">
-														Most popular
+												{pack.badge && (
+													<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white whitespace-nowrap">
+														{pack.badge}
 													</div>
 												)}
-												<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60">
-													{pkg.label}
+												<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60 capitalize">
+													{pack.id}
 												</h3>
 												<div className="mt-3 mb-1 flex items-baseline gap-2">
-													<span className="text-5xl font-bold tracking-tight">{pkg.credits}</span>
+													<span className="text-5xl font-bold tracking-tight">{pack.credits}</span>
 													<span className="text-sm text-white/40">credits</span>
 												</div>
-												<p className="text-2xl font-semibold mt-4">
-													{currencySymbol}
-													{pkg.price}
-												</p>
+												<p className="text-2xl font-semibold mt-4">₹{pack.priceINR}</p>
 												<p className="text-xs text-white/40 mt-0.5 mb-6">
-													{currencySymbol}
-													{(pkg.price / pkg.credits).toFixed(usingCashfree ? 2 : 3)} per credit
+													₹{perCredit} per credit
 												</p>
-												{usingCashfree ? (
-													<CashfreeCheckoutButton
-														creditAmount={pkg.credits}
-														price={pkg.price}
-														popular={pkg.popular}
-														mode={paymentMethods.cashfree_mode}
-														className="w-full mt-auto"
-													/>
-												) : (
-													<StripeCheckoutButton
-														creditAmount={pkg.credits}
-														price={pkg.price}
-														popular={pkg.popular}
-														className="w-full mt-auto"
-													/>
-												)}
+												<CashfreeCheckoutButton
+													packId={pack.id}
+													popular={popular}
+													mode={paymentMethods.cashfree_mode}
+													className="w-full mt-auto"
+												>
+													Buy now
+												</CashfreeCheckoutButton>
 											</motion.div>
-										))}
-									</div>
-								</>
+										);
+									})}
+								</div>
 							);
 						})()
 					) : loading ? (
