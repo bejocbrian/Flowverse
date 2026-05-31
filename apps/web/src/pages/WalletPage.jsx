@@ -16,8 +16,11 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
-import CashfreeCheckoutButton from '@/components/CashfreeCheckoutButton.jsx';
-import usePublicSettings from '@/hooks/usePublicSettings.js';
+// TEMPORARY: automated checkout disabled while payment verification is pending.
+// These gateway buttons are kept (commented) for quick restoration later.
+// import CashfreeCheckoutButton from '@/components/CashfreeCheckoutButton.jsx';
+// import PaytmCheckoutButton from '@/components/PaytmCheckoutButton.jsx';
+import ManualPaymentPanel from '@/components/ManualPaymentPanel.jsx';
 
 // Credit packs are loaded from the server (/cashfree/packs) so price and
 // credits always match what the server will charge. No hardcoded prices here.
@@ -67,21 +70,27 @@ const WalletPage = () => {
 	const [transactions, setTransactions] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
-	const { settings: publicSettings } = usePublicSettings();
-	const paymentMethods = publicSettings.payment_methods;
 	const [packs, setPacks] = useState([]);
 
 	useEffect(() => {
 		// Load credit packs from the server (authoritative price + credits).
+		// Packs are identical across providers; try cashfree first, fall back
+		// to the paytm endpoint so the buy tab still works when only Paytm
+		// is enabled.
 		let cancelled = false;
 		(async () => {
-			try {
-				const res = await apiServerClient.fetch('/cashfree/packs');
-				if (!res.ok) return;
-				const data = await res.json();
-				if (!cancelled) setPacks(Array.isArray(data.packs) ? data.packs : []);
-			} catch {
-				/* non-fatal: buy tab shows an empty state */
+			for (const url of ['/cashfree/packs', '/paytm/packs']) {
+				try {
+					const res = await apiServerClient.fetch(url);
+					if (!res.ok) continue;
+					const data = await res.json();
+					if (!cancelled && Array.isArray(data.packs) && data.packs.length) {
+						setPacks(data.packs);
+						return;
+					}
+				} catch {
+					/* try next */
+				}
 			}
 		})();
 		return () => {
@@ -208,11 +217,27 @@ const WalletPage = () => {
 					</div>
 
 					{tab === 'buy' ? (
+						/*
+						 * TEMPORARY: automated checkout (Stripe / Cashfree / Paytm) is
+						 * disabled while business/payment verification is pending. We
+						 * show a manual UPI-QR + WhatsApp flow instead so users can still
+						 * top up and we credit them by hand.
+						 *
+						 * TO RESTORE AUTOMATED CHECKOUT: delete the <ManualPaymentPanel/>
+						 * line below and uncomment the "AUTOMATED CHECKOUT" IIFE that
+						 * follows it. No other changes needed - the gateway components and
+						 * server routes are still in place.
+						 */
+						<ManualPaymentPanel packs={packs} />
+					) : /* ---------- AUTOMATED CHECKOUT (disabled, keep for restore) ----------
+					tab === 'buy' ? (
 						(() => {
 							const stripeOn = paymentMethods.stripe;
 							const cashfreeOn = paymentMethods.cashfree;
+							const paytmOn = paymentMethods.paytm;
+							const inrOn = cashfreeOn || paytmOn;
 
-							if (!stripeOn && !cashfreeOn) {
+							if (!stripeOn && !inrOn) {
 								return (
 									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
 										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
@@ -224,9 +249,9 @@ const WalletPage = () => {
 								);
 							}
 
-							if (!cashfreeOn) {
+							if (!inrOn) {
 								// Stripe-only fallback isn't wired to the server pack
-								// table yet; Cashfree (INR) is the production path.
+								// table yet; the INR providers are the production path.
 								return (
 									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
 										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
@@ -279,21 +304,34 @@ const WalletPage = () => {
 												<p className="text-xs text-white/40 mt-0.5 mb-6">
 													₹{perCredit} per credit
 												</p>
-												<CashfreeCheckoutButton
-													packId={pack.id}
-													popular={popular}
-													mode={paymentMethods.cashfree_mode}
-													className="w-full mt-auto"
-												>
-													Buy now
-												</CashfreeCheckoutButton>
+												<div className="mt-auto flex flex-col gap-2">
+													{cashfreeOn && (
+														<CashfreeCheckoutButton
+															packId={pack.id}
+															popular={popular}
+															mode={paymentMethods.cashfree_mode}
+															className="w-full"
+														>
+															{paytmOn ? 'Pay with UPI / Card' : 'Buy now'}
+														</CashfreeCheckoutButton>
+													)}
+													{paytmOn && (
+														<PaytmCheckoutButton
+															packId={pack.id}
+															popular={popular && !cashfreeOn}
+															className="w-full"
+														>
+															Pay with Paytm
+														</PaytmCheckoutButton>
+													)}
+												</div>
 											</motion.div>
 										);
 									})}
 								</div>
 							);
 						})()
-					) : loading ? (
+					) : ---------- END AUTOMATED CHECKOUT ---------- */ loading ? (
 						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
 							<Loader2 className="w-6 h-6 animate-spin text-white/40" />
 						</div>

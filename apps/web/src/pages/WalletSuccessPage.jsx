@@ -11,8 +11,9 @@ const WalletSuccessPage = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get('session_id');
   const cfOrderId = searchParams.get('cf_order_id');
+  const paytmOrderId = searchParams.get('paytm_order_id') || searchParams.get('order_id');
   const [details, setDetails] = useState(null);
-  const [provider, setProvider] = useState(null); // 'stripe' | 'cashfree'
+  const [provider, setProvider] = useState(null); // 'stripe' | 'cashfree' | 'paytm'
   const [loading, setLoading] = useState(true);
   const { refreshUser } = useAuth();
 
@@ -22,6 +23,8 @@ const WalletSuccessPage = () => {
       ? `/stripe/session/${sessionId}`
       : cfOrderId
       ? `/cashfree/order/${cfOrderId}`
+      : paytmOrderId
+      ? `/paytm/order/${paytmOrderId}`
       : null;
 
     if (!url) {
@@ -29,7 +32,7 @@ const WalletSuccessPage = () => {
       return;
     }
 
-    setProvider(sessionId ? 'stripe' : 'cashfree');
+    setProvider(sessionId ? 'stripe' : cfOrderId ? 'cashfree' : 'paytm');
 
     apiServerClient
       .fetch(url)
@@ -47,14 +50,14 @@ const WalletSuccessPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, cfOrderId, refreshUser]);
+  }, [sessionId, cfOrderId, paytmOrderId, refreshUser]);
 
   const formatAmount = () => {
     if (!details) return null;
     if (provider === 'stripe') {
       return `$${(details.amountTotal / 100).toFixed(2)}`;
     }
-    // Cashfree returns amount in major units, currency separately.
+    // Cashfree and Paytm return amount in major units, currency separately.
     const symbol = details.currency === 'INR' ? '₹' : `${details.currency || ''} `;
     return `${symbol}${Number(details.amount).toFixed(2)}`;
   };
@@ -92,6 +95,11 @@ const WalletSuccessPage = () => {
                 <span className="font-mono text-xs max-w-[160px] truncate">{details.id}</span>
               </div>
               {provider === 'cashfree' && details.status && details.status !== 'PAID' && (
+                <p className="text-xs text-amber-400 pt-2 border-t border-[hsl(var(--border))]">
+                  Status: {details.status}. Credits will appear once the payment is confirmed.
+                </p>
+              )}
+              {provider === 'paytm' && details.status && details.status !== 'TXN_SUCCESS' && (
                 <p className="text-xs text-amber-400 pt-2 border-t border-[hsl(var(--border))]">
                   Status: {details.status}. Credits will appear once the payment is confirmed.
                 </p>

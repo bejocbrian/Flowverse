@@ -1,6 +1,7 @@
 import pb from './pocketbaseClient.js';
 import logger from './logger.js';
 import { fetchCashfreeOrder } from './cashfreeClient.js';
+import { fetchPaytmOrder, PAYTM_SUCCESS_STATUS } from './paytmClient.js';
 
 /**
  * Idempotently credit a user for a PAID Cashfree order.
@@ -27,6 +28,14 @@ function isUniqueViolation(error) {
 	if (error.status !== 400) return false;
 	const data = error?.data?.data || error?.response?.data || {};
 	const field = data?.cashfree_order_id;
+	return field?.code === 'validation_not_unique';
+}
+
+function isUniqueViolationOn(error, fieldName) {
+	if (!error) return false;
+	if (error.status !== 400) return false;
+	const data = error?.data?.data || error?.response?.data || {};
+	const field = data?.[fieldName];
 	return field?.code === 'validation_not_unique';
 }
 
@@ -98,5 +107,143 @@ export async function creditCashfreeOrder(orderId, { knownOrder = null } = {}) {
 	await pb.collection('users').update(userId, { credits_balance: newBalance });
 
 	logger.info(`creditCashfreeOrder: credited user=${userId} order=${orderId} +${creditAmount} -> ${newBalance}`);
+	return { credited: true, reason: 'credited', balance: newBalance, creditAmount };
+}
+
+/**
+ * Idempotently credit a user for a SUCCESSFUL Paytm order.
+ *
+ * Called from BOTH the Paytm webhook/callback and the success-page order
+ * lookup. Whichever fires first credits; the other is a guaranteed no-op.
+ *
+ * Safety / exactly-once / NO PAYMENT MISMATCH:
+ *   - Unlike Cashfree, Paytm's status API does NOT echo back our custom
+ *     metadata (user_id, credit_amount). So we store a server-side
+ *     `paytm_orders` record at create time (orderId -> user, pack, expected
+ *     amount) and credit strictly from THAT record. The client can never
+ *     influence the credited amount.
+ *   - We always re-verify against Paytm's /v3/order/status API
+ *     (authoritative). Credits are only granted when Paytm itself reports
+ *     resultStatus=TXN_SUCCESS, so a forged/unauthenticated webhook cannot
+ *     grant credits.
+ *   - We assert Paytm's confirmed txnAmount EXACTLY equals the expected
+ *     amount stored on the pending order. Any mismatch aborts crediting and
+ *     is logged - this is the guard against a tampered or wrong-amount
+ *     payment ever being credited.
+ *   - The `transactions.paytm_order_id` column has a PARTIAL UNIQUE index.
+ *     The credit transaction is written FIRST; a concurrent duplicate is
+ *     rejected by the DB (validation_not_unique). Double-crediting is
+ *     impossible regardless of which path (webhook vs success-page) wins.
+ *
+ * Returns { credited, reason, balance }.
+ */
+export async function creditPaytmOrder(orderId, { knownOrder = null } = {}) {
+	if (!orderId) return { credited: false, reason: 'no_order_id' };
+
+	// 1) Load our server-side pending order - the ONLY source of truth for
+	//    who gets credited and how much.
+	let pending;
+	try {
+		pending = await pb.collection('paytm_orders').getFirstListItem(`order_id = "${orderId}"`);
+	} catch (e) {
+		const notFound =
+			e?.status === 404 ||
+			(e?.message || '').includes('not found') ||
+			(e?.message || '').includes("wasn't found");
+		if (notFound) {
+			logger.warn(`creditPaytmOrder: no pending order record for ${orderId}`);
+			return { credited: false, reason: 'unknown_order' };
+		}
+		logger.error(`creditPaytmOrder: pending lookup error for ${orderId}: ${e.message}`);
+		return { credited: false, reason: 'pending_lookup_failed' };
+	}
+
+	const userId = pending.user_id;
+	const creditAmount = parseInt(pending.credit_amount, 10);
+	const expectedAmount = Number(pending.expected_amount);
+	if (!userId || !Number.isFinite(creditAmount) || creditAmount <= 0 || !Number.isFinite(expectedAmount)) {
+		logger.warn(`creditPaytmOrder: invalid pending record for ${orderId}: ${JSON.stringify({ userId, creditAmount, expectedAmount })}`);
+		return { credited: false, reason: 'invalid_pending_record' };
+	}
+
+	// 2) Authoritative verification against Paytm.
+	const order = knownOrder || (await fetchPaytmOrder(orderId));
+	if (!order) return { credited: false, reason: 'order_fetch_failed' };
+
+	const status = order?.resultInfo?.resultStatus;
+	if (status !== PAYTM_SUCCESS_STATUS) {
+		return { credited: false, reason: `not_paid:${status || 'unknown'}` };
+	}
+
+	// 3) NO MISMATCH: Paytm's confirmed amount must equal what we expected for
+	//    this pack. Compare in paise to avoid float drift.
+	const paidAmount = Number(order.txnAmount);
+	if (!Number.isFinite(paidAmount) || Math.round(paidAmount * 100) !== Math.round(expectedAmount * 100)) {
+		logger.error(
+			`creditPaytmOrder: AMOUNT MISMATCH for ${orderId} ` +
+			`paid=${paidAmount} expected=${expectedAmount} - NOT crediting`,
+		);
+		return { credited: false, reason: 'amount_mismatch' };
+	}
+
+	// 4) Fast-path idempotency check (the unique index below is authoritative).
+	try {
+		const existing = await pb
+			.collection('transactions')
+			.getFirstListItem(`paytm_order_id = "${orderId}"`);
+		if (existing) {
+			logger.info(`creditPaytmOrder: ${orderId} already credited (tx ${existing.id})`);
+			return { credited: false, reason: 'already_credited' };
+		}
+	} catch (e) {
+		const notFound =
+			e?.status === 404 ||
+			(e?.message || '').includes('not found') ||
+			(e?.message || '').includes("wasn't found");
+		if (!notFound) {
+			logger.error(`creditPaytmOrder: idempotency check error for ${orderId}: ${e.message}`);
+			return { credited: false, reason: 'idempotency_check_failed' };
+		}
+	}
+
+	const user = await pb.collection('users').getOne(userId);
+	const newBalance = (user.credits_balance || 0) + creditAmount;
+
+	// 5) Write the audit transaction FIRST. Its PARTIAL UNIQUE paytm_order_id
+	//    makes this the atomic exactly-once gate: a racing request fails here.
+	try {
+		await pb.collection('transactions').create({
+			user_id: userId,
+			type: 'purchase',
+			amount: creditAmount,
+			balance_after: newBalance,
+			description: `Paytm order ${orderId}`,
+			paytm_order_id: orderId,
+		});
+	} catch (e) {
+		if (isUniqueViolationOn(e, 'paytm_order_id')) {
+			logger.info(`creditPaytmOrder: ${orderId} already credited (unique index)`);
+			return { credited: false, reason: 'already_credited' };
+		}
+		logger.error(`creditPaytmOrder: tx create failed for ${orderId}: ${e.message}`);
+		throw e;
+	}
+
+	// 6) Only now bump the balance - the transaction row succeeded, so this
+	//    order is guaranteed to be credited exactly once.
+	await pb.collection('users').update(userId, { credits_balance: newBalance });
+
+	// 7) Best-effort: mark the pending order paid for observability. Never
+	//    affects crediting correctness.
+	try {
+		await pb.collection('paytm_orders').update(pending.id, {
+			status: 'PAID',
+			txn_id: order.txnId || '',
+		});
+	} catch (e) {
+		logger.warn(`creditPaytmOrder: could not update pending order ${orderId}: ${e.message}`);
+	}
+
+	logger.info(`creditPaytmOrder: credited user=${userId} order=${orderId} +${creditAmount} -> ${newBalance}`);
 	return { credited: true, reason: 'credited', balance: newBalance, creditAmount };
 }

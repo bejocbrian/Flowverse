@@ -404,6 +404,22 @@ const AdminSettingsPage = () => {
                       onCheckedChange={(checked) => updateSetting('payment_cashfree_enabled', checked)}
                     />
                   </div>
+
+                  <div className="flex items-center justify-between p-4 bg-[hsl(var(--elevated))] rounded-lg border border-[hsl(var(--admin-border))]">
+                    <div className="flex items-center gap-3">
+                      <CreditCard className="w-5 h-5 text-sky-300" />
+                      <div>
+                        <Label className="text-white font-medium">Paytm (India: UPI, cards, netbanking, wallet)</Label>
+                        <p className="text-[hsl(var(--text-secondary))] text-sm">
+                          Paytm hosted checkout. Configure PAYTM_MID and PAYTM_MERCHANT_KEY (and PAYTM_ENV) in the API env.
+                        </p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.payment_paytm_enabled === true}
+                      onCheckedChange={(checked) => updateSetting('payment_paytm_enabled', checked)}
+                    />
+                  </div>
                 </div>
               </TabsContent>
 

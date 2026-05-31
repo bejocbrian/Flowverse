@@ -70,7 +70,7 @@ router.get('/public', async (req, res) => {
 		// Always return something useful so the app renders.
 		res.json({
 			...DEFAULT_SETTINGS,
-			payment_methods: { stripe: false, cashfree: true },
+			payment_methods: { stripe: false, cashfree: true, paytm: false },
 		});
 	}
 });
