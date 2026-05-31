@@ -121,7 +121,7 @@ const AdminSettingsPage = () => {
                 <CreditCard className="w-4 h-4" /> Payments
               </TabsTrigger>
               <TabsTrigger value="ratelimits" className="data-[state=active]:bg-[hsl(var(--elevated))] py-2 px-4 gap-2">
-                <Activity className="w-4 h-4" /> Rate Limits
+                <Activity className="w-4 h-4" /> Abuse Controls
               </TabsTrigger>
             </TabsList>
 
@@ -408,43 +408,58 @@ const AdminSettingsPage = () => {
               </TabsContent>
 
               <TabsContent value="ratelimits" className="mt-0 space-y-6">
-                <h3 className="text-lg font-bold border-b border-[hsl(var(--admin-border))] pb-4 mb-4">Concurrency & Tier Limits</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <h3 className="text-lg font-bold border-b border-[hsl(var(--admin-border))] pb-4 mb-4">Abuse Controls</h3>
+                <p className="text-[hsl(var(--text-secondary))] text-sm mb-6">
+                  Every generation calls the paid provider, so these limits protect against credit-burning abuse.
+                  Paid users (anyone with a credit purchase) are exempt from the free-user limits below. Leave a
+                  field blank to fall back to the server default; values must be whole numbers above zero.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <Label className="text-[hsl(var(--text-secondary))]">Free Tier Daily Limit</Label>
-                    <Input 
+                    <Label className="text-[hsl(var(--text-secondary))]">Free User — Daily Generation Cap</Label>
+                    <Input
                       type="number"
-                      value={settings.free_tier_limit || 5} 
-                      onChange={(e) => updateSetting('free_tier_limit', parseInt(e.target.value))}
-                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono" 
+                      min="1"
+                      placeholder="50"
+                      value={settings.free_daily_generation_cap ?? ''}
+                      onChange={(e) => updateSetting('free_daily_generation_cap', e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono"
                     />
+                    <p className="text-[hsl(var(--text-secondary))] text-xs">
+                      Max generations a free user can submit per rolling 24 hours. Default 50.
+                    </p>
                   </div>
+
                   <div className="space-y-2">
-                    <Label className="text-[hsl(var(--text-secondary))]">Pro Tier Daily Limit</Label>
-                    <Input 
+                    <Label className="text-[hsl(var(--text-secondary))]">Paid User — Daily Generation Cap</Label>
+                    <Input
                       type="number"
-                      value={settings.pro_tier_limit || 50} 
-                      onChange={(e) => updateSetting('pro_tier_limit', parseInt(e.target.value))}
-                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono" 
+                      min="1"
+                      placeholder="500"
+                      value={settings.paid_daily_generation_cap ?? ''}
+                      onChange={(e) => updateSetting('paid_daily_generation_cap', e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono"
                     />
+                    <p className="text-[hsl(var(--text-secondary))] text-xs">
+                      Max generations a paying user can submit per rolling 24 hours. Default 500.
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-[hsl(var(--text-secondary))]">Studio Tier Daily Limit</Label>
-                    <Input 
+
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-[hsl(var(--text-secondary))]">Free User — Burst Rate (per minute)</Label>
+                    <Input
                       type="number"
-                      value={settings.studio_tier_limit || 200} 
-                      onChange={(e) => updateSetting('studio_tier_limit', parseInt(e.target.value))}
-                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono" 
+                      min="1"
+                      placeholder="5"
+                      value={settings.free_generation_rate_max ?? ''}
+                      onChange={(e) => updateSetting('free_generation_rate_max', e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono max-w-[200px]"
                     />
-                  </div>
-                  <div className="space-y-2 md:col-span-3">
-                    <Label className="text-[hsl(var(--text-secondary))]">System-Wide Max Concurrent Jobs</Label>
-                    <Input 
-                      type="number"
-                      value={settings.max_concurrent_generations || 10} 
-                      onChange={(e) => updateSetting('max_concurrent_generations', parseInt(e.target.value))}
-                      className="bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))] text-white font-mono max-w-[200px]" 
-                    />
+                    <p className="text-[hsl(var(--text-secondary))] text-xs">
+                      How many generations a free user can fire within a 60-second window before being throttled.
+                      Paid users are not rate limited. Default 5.
+                    </p>
                   </div>
                 </div>
               </TabsContent>
