@@ -30,8 +30,32 @@ const UPI_PAYEE = 'AiSlopClub';
 // a friendly fallback instead of a broken image.
 const QR_SRC = '/payment-qr.png';
 
+// Display fallback for the credit-pack table. The wallet normally fills these
+// from the server (/cashfree/packs or /paytm/packs), but during the manual
+// payment period the API may be stale/unreachable - and since credits are
+// activated by hand here anyway, the table is purely informational. These
+// constants MIRROR apps/api/src/constants/creditPacks.js (K=5) and the
+// cheapest per-video cost (Veo 3.1 Fast/Lite = 15) so the table always
+// renders even if the packs API returns nothing.
+const FALLBACK_PACKS = [
+	{ id: 'trial', priceINR: 49, credits: 125 },
+	{ id: 'mini', priceINR: 99, credits: 300 },
+	{ id: 'creator', priceINR: 299, credits: 1000, badge: 'Most Popular' },
+	{ id: 'pro', priceINR: 649, credits: 2500 },
+	{ id: 'studio', priceINR: 1299, credits: 5500 },
+];
+const FALLBACK_VIDEO_UNIT_CREDITS = 15;
+
 const ManualPaymentPanel = ({ packs = [], videoUnitCredits = null }) => {
 	const [qrOk, setQrOk] = useState(true);
+
+	// Prefer server data; fall back to the constants above so the pack table
+	// is never blank (e.g. if the packs API is unreachable or not yet deployed).
+	const displayPacks = packs.length > 0 ? packs : FALLBACK_PACKS;
+	const displayVideoUnit =
+		typeof videoUnitCredits === 'number' && videoUnitCredits > 0
+			? videoUnitCredits
+			: FALLBACK_VIDEO_UNIT_CREDITS;
 
 	const waMessage = encodeURIComponent(
 		'Hi! I just paid for credits via the QR. ' +
@@ -113,16 +137,16 @@ const ManualPaymentPanel = ({ packs = [], videoUnitCredits = null }) => {
 						))}
 					</ol>
 
-					{packs.length > 0 && (
+					{displayPacks.length > 0 && (
 						<div className="mt-auto">
 							<p className="text-xs uppercase tracking-wider text-white/40 font-mono mb-2">
 								Credit packs
 							</p>
 							<ul className="divide-y divide-white/5 border border-white/10 rounded-xl overflow-hidden">
-								{packs.map((pack) => {
+								{displayPacks.map((pack) => {
 									const videos =
-										videoUnitCredits && videoUnitCredits > 0
-											? Math.floor(pack.credits / videoUnitCredits)
+										displayVideoUnit && displayVideoUnit > 0
+											? Math.floor(pack.credits / displayVideoUnit)
 											: null;
 									return (
 										<li
@@ -150,7 +174,7 @@ const ManualPaymentPanel = ({ packs = [], videoUnitCredits = null }) => {
 									);
 								})}
 							</ul>
-							{videoUnitCredits && (
+							{displayVideoUnit && (
 								<p className="text-[11px] text-white/30 mt-2">
 									Video estimate is based on our most affordable model; premium models use more credits.
 								</p>
