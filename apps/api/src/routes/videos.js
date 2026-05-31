@@ -7,6 +7,8 @@ import { getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
 import { calculateCreditCost, getAllModelCosts, getModelCreditCost } from '../utils/creditCalculator.js';
 import { withTransaction, refundCredits } from '../utils/dbTransaction.js';
 import { processGeneration } from '../workers/generationProcessor.js';
+import { checkDailyGenerationCap } from '../utils/generationLimit.js';
+import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 
 const router = Router();
 
@@ -71,7 +73,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /videos - Create video/image generation request and submit to GeminiGen
-router.post('/', async (req, res) => {
+router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, output_type, idempotency_key } = req.body;
 
 	if (!prompt || !provider || !model) {
@@ -119,6 +121,25 @@ router.post('/', async (req, res) => {
 
 	const isImage = output_type === 'image';
 	const creditCost = calculateCreditCost({ quality, duration, isImage, model });
+
+	// Anti-abuse: enforce a rolling 24h cap on how many generations a user can
+	// submit. Placed AFTER the idempotency replay check above, so genuine
+	// retries of an already-created generation are never counted against the
+	// cap. Every generation hits a paid provider, and failed generations are
+	// refunded, so this bounds the "submit → fail → refund → resubmit" loop
+	// that a credit balance alone does not.
+	const cap = await checkDailyGenerationCap({ userId: req.pocketbaseUserId });
+	if (!cap.allowed) {
+		logger.warn(`Daily generation cap hit for user ${req.pocketbaseUserId}: used=${cap.used}/${cap.cap} (paid=${cap.isPaid})`);
+		return res.status(429).json({
+			error: cap.isPaid
+				? `Daily generation limit reached (${cap.cap}/day). Please try again tomorrow.`
+				: `Daily free generation limit reached (${cap.cap}/day). Purchase credits to raise your limit, or try again tomorrow.`,
+			code: 'DAILY_LIMIT_REACHED',
+			cap: cap.cap,
+			used: cap.used,
+		});
+	}
 
 	try {
 		// Use atomic transaction for credit deduction, video creation, and transaction record

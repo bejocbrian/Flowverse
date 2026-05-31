@@ -4,13 +4,15 @@ import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { generateVideo, generateImage } from '../api/geminigen.js';
+import { checkDailyGenerationCap } from '../utils/generationLimit.js';
+import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 
 const router = Router();
 
 router.use(pocketbaseAuth);
 
 // POST /videos/:id/regenerate - Regenerate video with variations
-router.post('/:id/regenerate', async (req, res) => {
+router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => {
 	const { id } = req.params;
 	const {
 		sameSettings = true,
@@ -46,6 +48,22 @@ router.post('/:id/regenerate', async (req, res) => {
 		} catch (idemErr) {
 			logger.warn('Regen idempotency lookup failed:', idemErr.message);
 		}
+	}
+
+	// Anti-abuse: rolling 24h generation cap. A regenerate call can create up
+	// to `variationCount` new generations at once, so reserve that many slots.
+	// Placed after the idempotency replay check so genuine retries are exempt.
+	const cap = await checkDailyGenerationCap({ userId: req.pocketbaseUserId, requestedCount: variationCount });
+	if (!cap.allowed) {
+		logger.warn(`Daily generation cap hit on regenerate for user ${req.pocketbaseUserId}: used=${cap.used}/${cap.cap} requested=${cap.requested} (paid=${cap.isPaid})`);
+		return res.status(429).json({
+			error: cap.isPaid
+				? `Daily generation limit reached (${cap.cap}/day). Please try again tomorrow.`
+				: `Daily free generation limit reached (${cap.cap}/day). Purchase credits to raise your limit, or try again tomorrow.`,
+			code: 'DAILY_LIMIT_REACHED',
+			cap: cap.cap,
+			used: cap.used,
+		});
 	}
 
 	try {

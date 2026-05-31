@@ -98,13 +98,18 @@ Address race conditions and harden against more determined attackers.
 
 Recommendation: B for new features, A as a quick patch.
 
-### 2.2 Daily generation cap per user
+### 2.2 Daily generation cap per user ✅
 
-**Why:** A single compromised paying account can drain GeminiGen budget overnight.
+**Why:** A single compromised paying account can drain GeminiGen budget overnight. Equally, free users are only balance-capped on *successful* generations — failed generations are auto-refunded, leaving a "submit → fail → refund → resubmit" loop that hammers the paid provider without draining credits.
 
-**Where:** New middleware before `POST /videos` and `POST /videos/:id/regenerate`. Look up generations from this user in last 24h, reject if > N (e.g., 50 free / 500 paid).
+**Implemented:** Middleware-style check `checkDailyGenerationCap` (`apps/api/src/utils/generationLimit.js`) runs inside both `POST /videos` and `POST /videos/:id/regenerate`, after the idempotency replay check (so genuine retries are exempt). Counts `videos` rows created by the user in the last 24h and rejects with HTTP 429 (`code: DAILY_LIMIT_REACHED`) once the cap is hit. Regenerate reserves `variationCount` slots up front.
 
-Storage: PocketBase aggregate query (`getList(1, 1, { filter: 'user_id="X" && created >= ...' })`) with `totalItems` is enough. No Redis needed.
+- Free vs paid: a user is "paid" once they have any `transactions.type='purchase'`.
+- Caps configurable from the admin Settings page ("Abuse Controls" tab), backed by `settings` keys `free_daily_generation_cap` (default 50) and `paid_daily_generation_cap` (default 500); env (`FREE_DAILY_GENERATION_CAP` / `PAID_DAILY_GENERATION_CAP`) provides the fallback defaults.
+- Fail-open: if the count query errors, the request is allowed (never block a paying customer on a transient PB hiccup).
+- A complementary per-user **burst rate limit** throttles free users only (`apps/api/src/middleware/generation-rate-limit.js`); paid users bypass it. Burst max is admin-configurable (`free_generation_rate_max`, default 5/60s). Tier lookups are cached (`utils/userTier.js`) and settings are cached with fail-open defaults (`utils/abuseSettings.js`).
+
+Storage: PocketBase aggregate query (`getList(1, 1, { filter: 'user_id="X" && created >= ...' })`) with `totalItems`. No Redis needed.
 
 ### 2.3 Persistent rate limiter store
 
