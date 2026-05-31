@@ -12,6 +12,7 @@ import {
 	Loader2,
 	XCircle,
 	Image as ImageIcon,
+	AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiServerClient from '@/lib/apiServerClient.js';
@@ -282,6 +283,15 @@ const LibraryPage = () => {
 							<Sparkles className="w-3.5 h-3.5" />
 							New
 						</Link>
+					</div>
+
+					{/* Retention notice */}
+					<div className="flex items-start gap-3 mb-6 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-4 py-3">
+						<AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
+						<p className="text-sm text-amber-100/90 leading-relaxed">
+							Generated videos are kept for <span className="font-semibold">7 days</span>, then automatically
+							removed. Download anything you want to keep before then.
+						</p>
 					</div>
 
 					{/* Toolbar */}
