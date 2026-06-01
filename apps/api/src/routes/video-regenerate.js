@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
-import { generateVideo, generateImage } from '../api/geminigen.js';
+import { generateVideo, generateImage, extendVideo } from '../api/geminigen.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
@@ -168,6 +168,166 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 		throw error;
 	}
 });
+
+/**
+ * POST /videos/:id/extend - Extend a completed Veo video with a follow-up clip.
+ *
+ * Uses GeminiGen's /video-extend/veo, which takes the SOURCE video's generation
+ * UUID (our `external_id`) as `ref_history`. Model/aspect/resolution are
+ * inherited by the vendor, so we charge the same credits as a fresh generation
+ * of the source video's model/resolution.
+ */
+router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
+	const { id } = req.params;
+	const { prompt, idempotency_key } = req.body || {};
+
+	if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 3) {
+		return res.status(400).json({ error: 'A prompt describing the continuation is required' });
+	}
+
+	// Idempotency: same user + key in last 5 minutes returns the prior extend.
+	if (idempotency_key && typeof idempotency_key === 'string' && idempotency_key.length <= 100) {
+		try {
+			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+			const existing = await pb.collection('videos').getList(1, 1, {
+				filter: `user_id = "${req.pocketbaseUserId}" && idempotency_key = "${idempotency_key}" && created >= "${fiveMinutesAgo}"`,
+			});
+			if (existing.items.length > 0) {
+				return res.json({ video: { id: existing.items[0].id, status: existing.items[0].status }, idempotent: true });
+			}
+		} catch (idemErr) {
+			logger.warn('Extend idempotency lookup failed:', idemErr.message);
+		}
+	}
+
+	const cap = await checkDailyGenerationCap({ userId: req.pocketbaseUserId });
+	if (!cap.allowed) {
+		return res.status(429).json({
+			error: cap.isPaid
+				? `Daily generation limit reached (${cap.cap}/day). Please try again tomorrow.`
+				: `Daily free generation limit reached (${cap.cap}/day). Purchase credits to raise your limit, or try again tomorrow.`,
+			code: 'DAILY_LIMIT_REACHED',
+			cap: cap.cap,
+			used: cap.used,
+		});
+	}
+
+	try {
+		const source = await pb.collection('videos').getOne(id);
+		if (source.user_id !== req.pocketbaseUserId) {
+			return res.status(403).json({ error: 'Forbidden' });
+		}
+		if (source.output_type === 'image') {
+			return res.status(400).json({ error: 'Only videos can be extended' });
+		}
+		if (source.status !== 'completed') {
+			return res.status(400).json({ error: 'Only completed videos can be extended' });
+		}
+		// Extend needs the GeminiGen source UUID. external_id is hidden but the
+		// superuser API client reads it.
+		if (!source.external_id) {
+			return res.status(400).json({ error: 'This video cannot be extended' });
+		}
+
+		// Price the extend like a fresh generation of the source's model/resolution.
+		const enabled = getEnabledModels();
+		const variant =
+			enabled.find((m) => m.id === source.model && (m.credits?.[source.quality] != null || m.creditsPerSecond?.[source.quality] != null)) ||
+			enabled.find((m) => m.id === source.model) ||
+			null;
+		if (!variant) {
+			return res.status(400).json({ error: 'Source model is no longer available for extend' });
+		}
+		let creditCost;
+		try {
+			creditCost = computeCreditCost({ modelKey: variant.key, resolution: source.quality, duration: source.duration });
+		} catch (priceErr) {
+			logger.error(`Extend pricing error for ${variant.key}: ${priceErr.message}`);
+			return res.status(400).json({ error: 'Could not price this extension' });
+		}
+
+		const user = await pb.collection('users').getOne(req.pocketbaseUserId);
+		if (user.credits_balance < creditCost) {
+			return res.status(400).json({ error: 'Insufficient credits' });
+		}
+
+		// Create the child video record (inherits settings from the source).
+		const newVideo = await pb.collection('videos').create({
+			user_id: req.pocketbaseUserId,
+			prompt: prompt.trim(),
+			status: 'queued',
+			aspect_ratio: source.aspect_ratio,
+			duration: source.duration,
+			quality: source.quality,
+			provider: source.provider,
+			model: source.model,
+			output_type: 'video',
+			credit_cost: creditCost,
+			parent_video_id: id,
+			share_token: randomBytes(16).toString('hex'),
+			...(idempotency_key && { idempotency_key }),
+		});
+
+		const newBalance = user.credits_balance - creditCost;
+		await pb.collection('users').update(req.pocketbaseUserId, { credits_balance: newBalance });
+		await pb.collection('transactions').create({
+			user_id: req.pocketbaseUserId,
+			type: 'generation',
+			amount: creditCost,
+			balance_after: newBalance,
+			description: `Extend video: ${prompt.trim().substring(0, 40)}...`,
+			video_id: newVideo.id,
+		});
+
+		// Fire-and-forget submission to the extend endpoint.
+		submitExtend(newVideo, source.external_id).catch((error) => {
+			logger.error(`Extend submission failed for ${newVideo.id}:`, error.message);
+		});
+
+		logger.info(`Video extend queued: source=${id} -> ${newVideo.id}, cost=${creditCost}`);
+		res.json({ video: { id: newVideo.id, status: newVideo.status, credit_cost: creditCost } });
+	} catch (error) {
+		logger.error('Extend video error:', error.message);
+		if ((error?.message || '').includes('not found') || error?.status === 404) {
+			return res.status(404).json({ error: 'Video not found' });
+		}
+		throw error;
+	}
+});
+
+/**
+ * Submit an extend request to GeminiGen (async, fire-and-forget). Mirrors
+ * submitToGeminiGen's failure/refund handling.
+ */
+async function submitExtend(videoRecord, sourceUuid) {
+	try {
+		await pb.collection('videos').update(videoRecord.id, { status: 'processing' });
+		const result = await extendVideo({ prompt: videoRecord.prompt, ref_history: sourceUuid });
+		await pb.collection('videos').update(videoRecord.id, { external_id: result.uuid });
+		logger.info(`Extend submitted: video=${videoRecord.id}, external_id=${result.uuid}`);
+	} catch (error) {
+		logger.error(`Extend submission error for ${videoRecord.id}:`, error.message);
+		await pb.collection('videos').update(videoRecord.id, {
+			status: 'failed',
+			error_message: `Submission failed: ${error.message}`,
+		});
+		try {
+			const user = await pb.collection('users').getOne(videoRecord.user_id);
+			const newBalance = user.credits_balance + (videoRecord.credit_cost || 0);
+			await pb.collection('users').update(videoRecord.user_id, { credits_balance: newBalance });
+			await pb.collection('transactions').create({
+				user_id: videoRecord.user_id,
+				type: 'refund',
+				amount: videoRecord.credit_cost || 0,
+				balance_after: newBalance,
+				description: 'Refund: Extend failed',
+				video_id: videoRecord.id,
+			});
+		} catch (refundError) {
+			logger.error('Extend refund error:', refundError.message);
+		}
+	}
+}
 
 /**
  * Submit regeneration to GeminiGen API (async, fire-and-forget)

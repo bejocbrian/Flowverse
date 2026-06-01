@@ -2,10 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Helmet } from 'react-helmet';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+	ArrowLeftRight,
 	ArrowUp,
 	Check,
 	ChevronDown,
 	Coins,
+	Film,
+	ImagePlus,
+	Layers,
 	Loader2,
 	Plus,
 	Settings as SettingsIcon,
@@ -13,6 +17,7 @@ import {
 	RectangleHorizontal,
 	Sparkles,
 	Trash2,
+	Wand2,
 	X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,6 +31,9 @@ const ASPECT_RATIOS = [
 	{ id: '9:16', label: '9:16', icon: Smartphone },
 ];
 
+const MAX_REF_IMAGE_MB = 8;
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 const STARTER_PROMPTS = [
 	'Slow-motion ink dispersing in clear water, macro lens',
 	'Aurora dancing over a still alpine lake at midnight',
@@ -34,6 +42,79 @@ const STARTER_PROMPTS = [
 ];
 
 const DEFAULT_DURATION = 8;
+
+/** Read an image File into { id, preview, dataUrl }, or null on error (toasts). */
+function readImageFile(file) {
+	return new Promise((resolve) => {
+		if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+			toast.error('Only JPEG, PNG, or WebP images are allowed');
+			resolve(null);
+			return;
+		}
+		if (file.size > MAX_REF_IMAGE_MB * 1024 * 1024) {
+			toast.error(`Each image must be under ${MAX_REF_IMAGE_MB}MB`);
+			resolve(null);
+			return;
+		}
+		const reader = new FileReader();
+		reader.onload = () =>
+			resolve({
+				id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				preview: reader.result,
+				dataUrl: reader.result,
+			});
+		reader.onerror = () => {
+			toast.error('Could not read that image');
+			resolve(null);
+		};
+		reader.readAsDataURL(file);
+	});
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Compact Start/End frame chip (opens picker; shows thumb when set)         */
+/* -------------------------------------------------------------------------- */
+
+const FrameChip = ({ label, image, onPick, onClear }) => {
+	const inputRef = useRef(null);
+	return (
+		<div className="flex flex-col items-center gap-1">
+			<input
+				ref={inputRef}
+				type="file"
+				accept="image/jpeg,image/png,image/webp"
+				onChange={(e) => {
+					const f = e.target.files?.[0];
+					if (f) onPick(f);
+					if (inputRef.current) inputRef.current.value = '';
+				}}
+				className="hidden"
+			/>
+			{image ? (
+				<div className="relative w-20 h-14 rounded-lg overflow-hidden border border-white/15">
+					<img src={image.preview} alt={label} className="w-full h-full object-cover" />
+					<button
+						type="button"
+						onClick={onClear}
+						className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/70 text-white/80 hover:bg-red-500/80"
+						aria-label={`Remove ${label}`}
+					>
+						<X className="w-3 h-3" />
+					</button>
+				</div>
+			) : (
+				<button
+					type="button"
+					onClick={() => inputRef.current?.click()}
+					className="w-20 h-14 flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-white/20 text-white/50 hover:text-white hover:border-white/40 transition-colors"
+				>
+					<ImagePlus className="w-4 h-4" />
+				</button>
+			)}
+			<span className="text-[10px] uppercase tracking-wider text-white/40 font-mono">{label}</span>
+		</div>
+	);
+};
 
 /* -------------------------------------------------------------------------- */
 /*  Settings panel                                                            */
@@ -51,18 +132,44 @@ const SettingsPanel = ({
 	resolutions,
 	aspectRatio,
 	onSelectAspect,
+	aspectRatios,
 	durations,
 	duration,
 	onSelectDuration,
+	// reference images
+	supportsFrames,
+	supportsIngredients,
+	activeMode,
+	onToggleMode,
 	creditCost,
 	balance,
 }) => {
+	const panelRef = useRef(null);
+
+	// Dismiss on outside-click and Escape. Registered only while open.
+	useEffect(() => {
+		if (!open) return;
+		const onPointerDown = (e) => {
+			if (panelRef.current && !panelRef.current.contains(e.target)) onClose();
+		};
+		const onKeyDown = (e) => {
+			if (e.key === 'Escape') onClose();
+		};
+		document.addEventListener('pointerdown', onPointerDown, true);
+		document.addEventListener('keydown', onKeyDown);
+		return () => {
+			document.removeEventListener('pointerdown', onPointerDown, true);
+			document.removeEventListener('keydown', onKeyDown);
+		};
+	}, [open, onClose]);
+
 	if (!open) return null;
 
 	const insufficient = balance < creditCost;
 
 	return (
 		<motion.div
+			ref={panelRef}
 			initial={{ opacity: 0, y: 12 }}
 			animate={{ opacity: 1, y: 0 }}
 			exit={{ opacity: 0, y: 12 }}
@@ -84,7 +191,7 @@ const SettingsPanel = ({
 			<div className="flex flex-col gap-2">
 				<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Aspect ratio</label>
 				<div className="flex bg-black/40 p-1 rounded-xl">
-					{ASPECT_RATIOS.map((r) => {
+					{ASPECT_RATIOS.filter((r) => !aspectRatios || aspectRatios.includes(r.id)).map((r) => {
 						const Icon = r.icon;
 						const active = aspectRatio === r.id;
 						return (
@@ -123,23 +230,82 @@ const SettingsPanel = ({
 				</div>
 			)}
 
-			{/* Resolution */}
+			{/* Quality / resolution */}
 			{resolutions.length > 1 && (
 				<div className="flex flex-col gap-2">
-					<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Resolution</label>
+					<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Quality</label>
 					<div className="flex bg-black/40 p-1 rounded-xl">
-						{resolutions.map((r) => (
+						{resolutions.map((r) => {
+							const tag = r === '1080p' ? 'Full HD' : r === '720p' ? 'HD' : r === '480p' ? 'SD' : '';
+							const isLocked = r === '1080p'; // locked for free users (backend enforces)
+							return (
+								<button
+									key={r}
+									onClick={() => onSelectResolution(r)}
+									className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors flex flex-col items-center leading-tight ${
+										resolution === r ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+									}`}
+								>
+									<span className="flex items-center gap-1">
+										{r}
+										{isLocked && (
+											<span className={`text-[8px] font-bold px-1 py-0.5 rounded ${resolution === r ? 'bg-black/10 text-black/60' : 'bg-white/10 text-white/40'}`}>
+												PRO
+											</span>
+										)}
+									</span>
+									{tag && (
+										<span className={`text-[9px] font-mono ${resolution === r ? 'text-black/50' : 'text-white/30'}`}>
+											{tag}
+										</span>
+									)}
+								</button>
+							);
+						})}
+					</div>
+					{resolution === '1080p' && (
+						<p className="text-[11px] text-amber-400/70">
+							Full HD requires a credit purchase. Free accounts generate in 720p.
+						</p>
+					)}
+				</div>
+			)}
+
+			{/* Frames / Ingredients mode toggle */}
+			{(supportsFrames || supportsIngredients) && (
+				<div className="flex flex-col gap-2">
+					<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Image input</label>
+					<div className="flex bg-black/40 p-1 rounded-xl">
+						{supportsFrames && (
 							<button
-								key={r}
-								onClick={() => onSelectResolution(r)}
-								className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-									resolution === r ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+								onClick={() => onToggleMode(activeMode === 'frame' ? null : 'frame')}
+								className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors ${
+									activeMode === 'frame' ? 'bg-white text-black' : 'text-white/50 hover:text-white'
 								}`}
 							>
-								{r}
+								<Film className="w-3.5 h-3.5" />
+								Frames
 							</button>
-						))}
+						)}
+						{supportsIngredients && (
+							<button
+								onClick={() => onToggleMode(activeMode === 'ingredient' ? null : 'ingredient')}
+								className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors ${
+									activeMode === 'ingredient' ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+								}`}
+							>
+								<Layers className="w-3.5 h-3.5" />
+								Ingredients
+							</button>
+						)}
 					</div>
+					<p className="text-[11px] text-white/40">
+						{activeMode === 'frame'
+							? 'Start/End frame slots appear in the prompt bar below.'
+							: activeMode === 'ingredient'
+							? 'Use the + in the prompt bar to add reference images.'
+							: 'Select a mode to add reference images.'}
+					</p>
 				</div>
 			)}
 
@@ -252,13 +418,28 @@ const GeneratePage = () => {
 	const [duration, setDuration] = useState(DEFAULT_DURATION);
 	const [showSettings, setShowSettings] = useState(false);
 
+	// Reference images. Frames (first/last keyframes) and Ingredients
+	// (subject/style refs) are MUTUALLY EXCLUSIVE - the API's mode_image is one
+	// or the other. Each image: { id, preview, dataUrl }.
+	// `activeMode`: null | 'frame' | 'ingredient' — controls which picker shows
+	// in the dock bar. Toggled from the settings panel.
+	const [activeMode, setActiveMode] = useState(null);
+	const [frameFirst, setFrameFirst] = useState(null);
+	const [frameLast, setFrameLast] = useState(null);
+	const [ingredients, setIngredients] = useState([]);
+
 	const [loading, setLoading] = useState(false);
 	const [stage, setStage] = useState(0);
 	const [progress, setProgress] = useState(0);
 	const [generatedResult, setGeneratedResult] = useState(null);
+	// The DB id of the last completed video, used for the Extend action.
+	const [lastVideoId, setLastVideoId] = useState(null);
+	const [extendOpen, setExtendOpen] = useState(false);
+	const [extendPrompt, setExtendPrompt] = useState('');
 
 	const pollingRef = useRef(null);
 	const progressRef = useRef(null);
+	const ingredientInputRef = useRef(null);
 
 	/* ---------------------------- load models ---------------------------- */
 
@@ -301,8 +482,44 @@ const GeneratePage = () => {
 
 	const resolutions = selectedModel?.resolutions ?? [];
 	const durations = selectedModel?.durations ?? [];
+	const aspectRatios = selectedModel?.aspectRatios ?? ['16:9'];
+	const imageModes = selectedModel?.imageModes ?? [];
 
-	// keep resolution + duration valid when the model changes
+	// Which reference controls this model supports.
+	const supportsFrames = imageModes.includes('frame');
+	// 'ingredient' (Veo) or 'reference' (Grok) both render as the Ingredients control.
+	const ingredientMode = imageModes.includes('ingredient')
+		? 'ingredient'
+		: imageModes.includes('reference')
+		? 'reference'
+		: null;
+	const supportsIngredients = Boolean(ingredientMode);
+	const maxIngredients = Math.min(selectedModel?.maxRefImages ?? 3, 3);
+
+	const clearRefImages = useCallback(() => {
+		setFrameFirst(null);
+		setFrameLast(null);
+		setIngredients([]);
+	}, []);
+
+	const handleToggleMode = useCallback((mode) => {
+		if (mode === activeMode) {
+			// Deactivate
+			setActiveMode(null);
+			return;
+		}
+		// Switching modes: clear the other mode's images (mutual exclusivity).
+		if (mode === 'frame') {
+			setIngredients([]);
+		} else if (mode === 'ingredient') {
+			setFrameFirst(null);
+			setFrameLast(null);
+		}
+		setActiveMode(mode);
+	}, [activeMode]);
+
+	// keep resolution + duration + aspect valid, and drop ref images the model
+	// can't use, whenever the model changes.
 	useEffect(() => {
 		if (!selectedModel) return;
 		if (!selectedModel.resolutions?.includes(resolution)) {
@@ -315,16 +532,29 @@ const GeneratePage = () => {
 					: selectedModel.durations?.[0] || DEFAULT_DURATION
 			);
 		}
-	}, [selectedModel, resolution, duration]);
+		const ars = selectedModel.aspectRatios || ['16:9'];
+		if (!ars.includes(aspectRatio)) setAspectRatio(ars[0]);
+
+		const modes = selectedModel.imageModes || [];
+		if (!modes.includes('frame') && (frameFirst || frameLast)) {
+			setFrameFirst(null);
+			setFrameLast(null);
+		}
+		if (!modes.includes('ingredient') && !modes.includes('reference') && ingredients.length > 0) {
+			setIngredients([]);
+		}
+		// Reset activeMode if the model doesn't support it.
+		if (activeMode === 'frame' && !modes.includes('frame')) setActiveMode(null);
+		if (activeMode === 'ingredient' && !modes.includes('ingredient') && !modes.includes('reference')) setActiveMode(null);
+	}, [selectedModel, resolution, duration, aspectRatio, frameFirst, frameLast, ingredients.length, activeMode]);
 
 	const creditCost = useMemo(() => {
 		if (!selectedModel) return 0;
 		if (selectedModel.billing === 'per_second') {
 			const rate = selectedModel.creditsPerSecond?.[resolution];
 			if (!rate || !duration) return 0;
-			return Math.ceil(rate * duration); // matches server: ceil(rate × duration)
+			return Math.ceil(rate * duration);
 		}
-		// per_video / per_image: flat per resolution
 		const map = selectedModel.credits || {};
 		return map[resolution] ?? map.default ?? 0;
 	}, [selectedModel, resolution, duration]);
@@ -332,6 +562,44 @@ const GeneratePage = () => {
 	const insufficient = balance < creditCost;
 	const promptOk = prompt.trim().length >= 3;
 	const canSubmit = !loading && promptOk && !insufficient && Boolean(selectedModel);
+
+	const refCount = (frameFirst ? 1 : 0) + (frameLast ? 1 : 0) + ingredients.length;
+
+	/* ---------------------------- reference images ----------------------- */
+
+	// Frames and Ingredients are mutually exclusive: picking one clears the other.
+	const handlePickFrame = useCallback(async (slot, file) => {
+		const img = await readImageFile(file);
+		if (!img) return;
+		setIngredients([]); // mutual exclusivity
+		if (slot === 'first') setFrameFirst(img);
+		else setFrameLast(img);
+	}, []);
+
+	const handleClearFrame = useCallback((slot) => {
+		if (slot === 'first') setFrameFirst(null);
+		else setFrameLast(null);
+	}, []);
+
+	const handleAddIngredients = useCallback(
+		async (files) => {
+			if (!files.length) return;
+			const slotsLeft = maxIngredients - ingredients.length;
+			if (slotsLeft <= 0) return;
+			const read = await Promise.all(files.slice(0, slotsLeft).map(readImageFile));
+			const valid = read.filter(Boolean);
+			if (!valid.length) return;
+			// mutual exclusivity: ingredients replace any frame images
+			setFrameFirst(null);
+			setFrameLast(null);
+			setIngredients((prev) => [...prev, ...valid]);
+		},
+		[maxIngredients, ingredients.length]
+	);
+
+	const handleRemoveIngredient = useCallback((id) => {
+		setIngredients((prev) => prev.filter((img) => img.id !== id));
+	}, []);
 
 	/* ---------------------------- polling -------------------------------- */
 
@@ -362,6 +630,7 @@ const GeneratePage = () => {
 						setStage(3);
 						setProgress(100);
 						setGeneratedResult({ type: 'video', url: data.video_url });
+						setLastVideoId(videoId);
 						setLoading(false);
 						refreshUser();
 						toast.success('Generation complete');
@@ -383,6 +652,20 @@ const GeneratePage = () => {
 
 	/* ---------------------------- submit --------------------------------- */
 
+	// Resolve the active reference-image payload from the mutually-exclusive
+	// Frames / Ingredients state.
+	const buildImagePayload = useCallback(() => {
+		if (frameFirst || frameLast) {
+			// Order matters for frames: [first, last].
+			const imgs = [frameFirst, frameLast].filter(Boolean).map((i) => i.dataUrl);
+			return { image_mode: 'frame', ref_images: imgs };
+		}
+		if (ingredients.length > 0 && ingredientMode) {
+			return { image_mode: ingredientMode, ref_images: ingredients.map((i) => i.dataUrl) };
+		}
+		return null;
+	}, [frameFirst, frameLast, ingredients, ingredientMode]);
+
 	const handleSubmit = useCallback(async () => {
 		if (!canSubmit || !selectedModel) return;
 
@@ -397,6 +680,8 @@ const GeneratePage = () => {
 					? crypto.randomUUID()
 					: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+			const imagePayload = buildImagePayload();
+
 			const response = await apiServerClient.fetch('/videos', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -410,6 +695,7 @@ const GeneratePage = () => {
 					model_key: selectedModel.key,
 					output_type: 'video',
 					idempotency_key: idempotencyKey,
+					...(imagePayload || {}),
 				}),
 			});
 
@@ -445,7 +731,7 @@ const GeneratePage = () => {
 					: 'Generation failed';
 			toast.error(message);
 		}
-	}, [canSubmit, selectedModel, prompt, aspectRatio, duration, resolution, startPolling, stopPolling]);
+	}, [canSubmit, selectedModel, prompt, aspectRatio, duration, resolution, buildImagePayload, startPolling, stopPolling]);
 
 	const handleClear = () => {
 		stopPolling();
@@ -454,11 +740,65 @@ const GeneratePage = () => {
 		setProgress(0);
 		setStage(0);
 		setLoading(false);
+		clearRefImages();
+		setActiveMode(null);
+		setLastVideoId(null);
+		setExtendOpen(false);
+		setExtendPrompt('');
 	};
 
 	const handleStarter = (text) => {
 		setPrompt(text);
 	};
+
+	/* ---------------------------- extend --------------------------------- */
+
+	const handleExtend = useCallback(async () => {
+		if (!lastVideoId || !extendPrompt.trim() || extendPrompt.trim().length < 3) {
+			toast.error('Describe what should happen next (a few words).');
+			return;
+		}
+		setLoading(true);
+		setProgress(0);
+		setStage(0);
+		setExtendOpen(false);
+		const continuation = extendPrompt.trim();
+
+		try {
+			const idempotencyKey =
+				typeof crypto !== 'undefined' && crypto.randomUUID
+					? crypto.randomUUID()
+					: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+			const response = await apiServerClient.fetch(`/videos/${lastVideoId}/extend`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ prompt: continuation, idempotency_key: idempotencyKey }),
+			});
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.error || `Extend failed (HTTP ${response.status})`);
+			}
+
+			const data = await response.json();
+			const newId = data.video?.id;
+			setGeneratedResult(null);
+			setPrompt(continuation);
+			setExtendPrompt('');
+			setStage(1);
+			progressRef.current = setInterval(() => {
+				setProgress((p) => (p >= 90 ? 90 : p + 1));
+			}, 1000);
+			if (newId) startPolling(newId);
+		} catch (error) {
+			stopPolling();
+			setLoading(false);
+			setProgress(0);
+			setStage(0);
+			toast.error(typeof error?.message === 'string' ? error.message : 'Extend failed');
+		}
+	}, [lastVideoId, extendPrompt, startPolling, stopPolling]);
 
 	/* ---------------------------- render --------------------------------- */
 
@@ -551,14 +891,65 @@ const GeneratePage = () => {
 								</div>
 								<div className="flex items-center justify-between mt-4 px-1 text-xs text-white/50">
 									<span className="font-mono truncate">{prompt}</span>
-									<button
-										onClick={handleClear}
-										className="ml-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-white"
-									>
-										<Plus className="w-3.5 h-3.5" />
-										New
-									</button>
+									<div className="ml-3 flex items-center gap-2 shrink-0">
+										{lastVideoId && (
+											<button
+												onClick={() => setExtendOpen((v) => !v)}
+												className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-white"
+											>
+												<Wand2 className="w-3.5 h-3.5" />
+												Extend
+											</button>
+										)}
+										<button
+											onClick={handleClear}
+											className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-white"
+										>
+											<Plus className="w-3.5 h-3.5" />
+											New
+										</button>
+									</div>
 								</div>
+
+								{/* Extend composer */}
+								<AnimatePresence>
+									{extendOpen && lastVideoId && (
+										<motion.div
+											initial={{ opacity: 0, height: 0 }}
+											animate={{ opacity: 1, height: 'auto' }}
+											exit={{ opacity: 0, height: 0 }}
+											className="mt-3 overflow-hidden"
+										>
+											<div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 flex flex-col gap-2">
+												<p className="text-[11px] text-white/40">
+													Describe what happens next — the new clip continues from this video.
+												</p>
+												<div className="flex items-center gap-2">
+													<input
+														type="text"
+														value={extendPrompt}
+														onChange={(e) => setExtendPrompt(e.target.value)}
+														onKeyDown={(e) => {
+															if (e.key === 'Enter' && !e.shiftKey) {
+																e.preventDefault();
+																handleExtend();
+															}
+														}}
+														placeholder="e.g. the camera pulls back to reveal a city skyline"
+														className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30"
+													/>
+													<button
+														onClick={handleExtend}
+														disabled={extendPrompt.trim().length < 3}
+														className="px-4 py-2 rounded-lg bg-white text-black text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed"
+													>
+														Extend
+													</button>
+												</div>
+											</div>
+										</motion.div>
+									)}
+								</AnimatePresence>
 							</motion.div>
 						)}
 					</div>
@@ -584,9 +975,14 @@ const GeneratePage = () => {
 									resolutions={resolutions}
 									aspectRatio={aspectRatio}
 									onSelectAspect={setAspectRatio}
+									aspectRatios={aspectRatios}
 									durations={durations}
 									duration={duration}
 									onSelectDuration={setDuration}
+									supportsFrames={supportsFrames}
+									supportsIngredients={supportsIngredients}
+									activeMode={activeMode}
+									onToggleMode={handleToggleMode}
 									creditCost={creditCost}
 									balance={balance}
 								/>
@@ -594,6 +990,57 @@ const GeneratePage = () => {
 						</AnimatePresence>
 
 						<div className="bg-[#1a1b1e]/90 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl flex items-center gap-2 sm:gap-3 p-2 sm:p-2.5">
+							{/* Frame chips (left of input, when Frames mode active) */}
+							{activeMode === 'frame' && (
+								<div className="flex items-center gap-1.5 shrink-0">
+									<FrameChip label="Start" image={frameFirst} onPick={(f) => handlePickFrame('first', f)} onClear={() => handleClearFrame('first')} />
+									<ArrowLeftRight className="w-3.5 h-3.5 text-white/25" />
+									<FrameChip label="End" image={frameLast} onPick={(f) => handlePickFrame('last', f)} onClear={() => handleClearFrame('last')} />
+								</div>
+							)}
+
+							{/* Ingredient + button (left of input, when Ingredients mode active) */}
+							{activeMode === 'ingredient' && (
+								<div className="flex items-center gap-1 shrink-0">
+									{ingredients.map((img) => (
+										<div key={img.id} className="relative w-9 h-9 rounded-lg overflow-hidden border border-white/10">
+											<img src={img.preview} alt="ref" className="w-full h-full object-cover" />
+											<button
+												type="button"
+												onClick={() => handleRemoveIngredient(img.id)}
+												className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 hover:opacity-100 transition-opacity"
+												aria-label="Remove"
+											>
+												<X className="w-3 h-3 text-white" />
+											</button>
+										</div>
+									))}
+									{ingredients.length < maxIngredients && (
+										<>
+											<input
+												ref={ingredientInputRef}
+												type="file"
+												accept="image/jpeg,image/png,image/webp"
+												multiple
+												onChange={(e) => {
+													handleAddIngredients(Array.from(e.target.files || []));
+													if (ingredientInputRef.current) ingredientInputRef.current.value = '';
+												}}
+												className="hidden"
+											/>
+											<button
+												type="button"
+												onClick={() => ingredientInputRef.current?.click()}
+												className="w-9 h-9 flex items-center justify-center rounded-lg border border-dashed border-white/20 text-white/50 hover:text-white hover:border-white/40 transition-colors"
+												aria-label="Add reference image"
+											>
+												<Plus className="w-4 h-4" />
+											</button>
+										</>
+									)}
+								</div>
+							)}
+
 							<input
 								type="text"
 								value={prompt}
@@ -606,7 +1053,7 @@ const GeneratePage = () => {
 								}}
 								placeholder={modelsLoading ? 'Loading models…' : 'Describe the shot you want…'}
 								disabled={modelsLoading || loading}
-								className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-sm sm:text-base text-white placeholder:text-white/30 disabled:opacity-50"
+								className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-sm sm:text-base text-white placeholder:text-white/30 disabled:opacity-50 min-w-0"
 							/>
 
 							<button
@@ -625,6 +1072,15 @@ const GeneratePage = () => {
 								<span>{resolution}</span>
 								<span className="text-white/30">·</span>
 								<span>{duration}s</span>
+								{refCount > 0 && (
+									<>
+										<span className="text-white/30">·</span>
+										<span className="inline-flex items-center gap-1 text-[hsl(var(--accent-primary))]">
+											<ImagePlus className="w-3 h-3" />
+											{refCount}
+										</span>
+									</>
+								)}
 								<span className="text-white/30">·</span>
 								<span className={insufficient ? 'text-red-400' : ''}>{creditCost} cr</span>
 							</button>

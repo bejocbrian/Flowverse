@@ -150,27 +150,29 @@ async function fetchWithRetry(endpoint, options, context = 'API') {
  *
  * @param {Object} params
  * @param {string} params.prompt - Text prompt for video generation
- * @param {string} [params.model='veo-3.1'] - Model: veo-3.1, veo-3.1-fast, veo-2, sora-2, sora-2-pro, sora-2-pro-hd
- * @param {string} [params.resolution='720p'] - Resolution: 720p or 1080p (Veo only)
- * @param {number} [params.duration=4] - Duration in seconds. Veo: 4/6/8. Sora: 10/15/25.
- * @param {string} [params.aspect_ratio='16:9'] - Aspect ratio. Veo: 16:9/9:16. Sora: landscape/portrait.
- * @param {string} [params.mode_image] - Veo only: 'frame' or 'ingredient'
- * @param {string} [params.ref_image_url] - Reference image URL
+ * @param {string} [params.model='veo-3.1'] - Model id (veo-3.1, veo-3.1-fast, veo-3.1-lite, veo-2, grok-3)
+ * @param {string} [params.resolution='720p'] - Resolution. Veo: 720p/1080p. Grok: 480p/720p.
+ * @param {number} [params.duration=8] - Duration in seconds.
+ * @param {string} [params.aspect_ratio='16:9'] - '16:9' | '9:16' (mapped to vendor vocab per provider)
+ * @param {string} [params.mode_image] - Veo only: 'frame' (1-2 keyframes) or 'ingredient' (1-3 refs)
+ * @param {string[]} [params.ref_image_urls] - Public URLs of reference images (already uploaded)
  * @returns {Promise<{uuid: string, status: number}>}
  */
 export async function generateVideo({
 	prompt,
 	model = 'veo-3.1',
 	resolution = '720p',
-	duration = 4,
+	duration = 8,
 	aspect_ratio = '16:9',
 	mode_image,
-	ref_image_url,
+	ref_image_urls,
 }) {
 	const provider = MODEL_PROVIDER_MAP[model];
 	if (!provider) {
 		throw new Error(`Unknown video model: ${model}. Supported: ${Object.keys(MODEL_PROVIDER_MAP).join(', ')}`);
 	}
+
+	const refs = Array.isArray(ref_image_urls) ? ref_image_urls.filter(Boolean) : [];
 
 	const form = new FormData();
 	form.append('prompt', prompt);
@@ -180,22 +182,34 @@ export async function generateVideo({
 		form.append('resolution', resolution);
 		form.append('duration', String(duration));
 		form.append('aspect_ratio', aspect_ratio);
-		if (mode_image) {
-			form.append('mode_image', mode_image);
-		}
-		if (ref_image_url) {
-			form.append('ref_images', ref_image_url);
+		if (refs.length > 0) {
+			// Veo: ref_images accepts public URLs. mode_image selects how they
+			// are used: 'frame' (start/end keyframes, max 2) or 'ingredient'
+			// (subject/style references, max 3). Order matters for 'frame'.
+			form.append('mode_image', mode_image === 'ingredient' ? 'ingredient' : 'frame');
+			for (const url of refs) {
+				form.append('ref_images', url);
+			}
 		}
 	} else if (provider === 'grok') {
 		form.append('resolution', resolution);
 		form.append('duration', String(duration));
-		// Grok uses 'landscape'/'portrait' instead of '16:9'/'9:16'
+		// Grok uses descriptive aspect-ratio vocab instead of '16:9'/'9:16'.
 		const grokAspect = aspect_ratio === '9:16' ? 'portrait' : 'landscape';
 		form.append('aspect_ratio', grokAspect);
+		form.append('mode', 'custom');
+		if (refs.length > 0) {
+			// Grok takes reference images via file_urls (public URLs). Only one
+			// of files/file_urls/ref_images may be used per request; we always
+			// use file_urls since we host the uploads ourselves.
+			for (const url of refs) {
+				form.append('file_urls', url);
+			}
+		}
 	}
 
 	const endpoint = `${API_BASE_URL()}/video-gen/${provider}`;
-	logger.info(`GeminiGen video request: POST ${endpoint} model=${model}`);
+	logger.info(`GeminiGen video request: POST ${endpoint} model=${model} refs=${refs.length} mode=${mode_image || 'none'}`);
 
 	const response = await fetchWithRetry(endpoint, {
 		method: 'POST',
@@ -205,6 +219,44 @@ export async function generateVideo({
 
 	const data = await response.json();
 	logger.info(`GeminiGen video submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
+
+	return {
+		uuid: data.uuid || data.id || data.request_id,
+		status: data.status,
+		raw: data,
+	};
+}
+
+/**
+ * Extend an existing GeminiGen Veo video by its generation UUID.
+ * POST /video-extend/veo with { prompt, ref_history }.
+ * Model/aspect/resolution are inherited from the source video by the vendor.
+ *
+ * @param {Object} params
+ * @param {string} params.prompt - What should happen in the continuation.
+ * @param {string} params.ref_history - UUID of a video previously generated on GeminiGen.
+ * @returns {Promise<{uuid: string, status: number}>}
+ */
+export async function extendVideo({ prompt, ref_history }) {
+	if (!ref_history) {
+		throw new Error('extendVideo requires ref_history (source video UUID)');
+	}
+
+	const form = new FormData();
+	form.append('prompt', prompt);
+	form.append('ref_history', ref_history);
+
+	const endpoint = `${API_BASE_URL()}/video-extend/veo`;
+	logger.info(`GeminiGen extend request: POST ${endpoint} ref_history=${ref_history}`);
+
+	const response = await fetchWithRetry(endpoint, {
+		method: 'POST',
+		headers: getHeaders(),
+		body: form,
+	}, 'GeminiGen extend');
+
+	const data = await response.json();
+	logger.info(`GeminiGen extend submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
 
 	return {
 		uuid: data.uuid || data.id || data.request_id,

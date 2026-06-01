@@ -43,18 +43,7 @@ const MainLayout = ({ children }) => {
 					</button>
 				</div>
 
-				<div className="flex-1 max-w-2xl px-4">
-					<div className="relative group">
-						<input
-							type="text"
-							placeholder="Search or ask anything"
-							className="w-full bg-[#1a1b1e] border border-white/5 rounded-full py-2.5 pl-12 pr-4 text-sm focus:bg-[#25262b] focus:border-white/20 transition-all outline-none"
-						/>
-						<span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-white/60">
-							search
-						</span>
-					</div>
-				</div>
+				<div className="flex-1" />
 
 				<div className="flex items-center gap-2 min-w-[200px] justify-end">
 					<button

@@ -53,13 +53,25 @@ export async function processGeneration(videoRecord, isImage) {
 				return;
 			}
 		} else {
+			// Parse stored reference-image URLs (JSON array) if present.
+			let refUrls = [];
+			if (videoRecord.ref_image_urls) {
+				try {
+					const parsed = JSON.parse(videoRecord.ref_image_urls);
+					if (Array.isArray(parsed)) refUrls = parsed.filter(Boolean);
+				} catch {
+					/* ignore malformed - treat as no refs */
+				}
+			}
+
 			result = await generateVideo({
 				prompt: videoRecord.prompt,
 				model: videoRecord.model,
 				aspect_ratio: videoRecord.aspect_ratio,
 				duration: videoRecord.duration,
 				resolution: videoRecord.quality || '720p',
-				mode_image: videoRecord.mode_image,
+				mode_image: videoRecord.mode_image || undefined,
+				ref_image_urls: refUrls,
 			});
 		}
 

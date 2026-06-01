@@ -19,6 +19,9 @@ router.get('/', (_req, res) => {
 		type: m.type,
 		durations: variantDurations(m),
 		resolutions: variantResolutions(m),
+		aspectRatios: Array.isArray(m.aspectRatios) ? m.aspectRatios : ['16:9'],
+		imageModes: Array.isArray(m.imageModes) ? m.imageModes : [],
+		maxRefImages: Number.isFinite(m.maxRefImages) ? m.maxRefImages : 0,
 		...variantPricingDisplay(m), // { billing, credits } or { billing, creditsPerSecond }
 	}));
 	res.json({ models });

@@ -10,6 +10,8 @@ import { withTransaction, refundCredits } from '../utils/dbTransaction.js';
 import { processGeneration } from '../workers/generationProcessor.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
+import { uploadRefImages } from '../utils/refImageUpload.js';
+import { isPaidUser } from '../utils/userTier.js';
 
 const router = Router();
 
@@ -72,7 +74,7 @@ router.get('/', async (req, res) => {
 
 // POST /videos - Create video/image generation request and submit to GeminiGen
 router.post('/', freeUserGenerationRateLimit, async (req, res) => {
-	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, model_key, output_type, idempotency_key } = req.body;
+	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, model_key, output_type, idempotency_key, image_mode, ref_images } = req.body;
 
 	if (!prompt || !provider || !model) {
 		return res.status(400).json({ error: 'prompt, provider, and model are required' });
@@ -136,6 +138,18 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 		return res.status(400).json({ error: 'Unknown or unavailable model' });
 	}
 
+	// Free users cannot generate in 1080p (Full HD). This saves vendor cost on
+	// free-tier abuse and incentivizes purchases.
+	if (quality === '1080p') {
+		const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
+		if (!paid) {
+			return res.status(403).json({
+				error: 'Full HD (1080p) is available for paid users only. Purchase credits to unlock.',
+				code: 'HD_LOCKED',
+			});
+		}
+	}
+
 	let creditCost;
 	try {
 		creditCost = computeCreditCost({
@@ -146,6 +160,34 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	} catch (priceErr) {
 		logger.error(`Pricing error for ${variant.key}: ${priceErr.message}`);
 		return res.status(400).json({ error: 'Could not price this generation' });
+	}
+
+	// Reference images (image-to-video). Validate against the model's declared
+	// capabilities BEFORE uploading anything. `image_mode` is 'frame' (Veo
+	// keyframes) | 'ingredient' (Veo refs) | 'reference' (Grok refs).
+	let refImageUrls = [];
+	let resolvedImageMode = null;
+	if (!isImage && Array.isArray(ref_images) && ref_images.length > 0) {
+		const supportedModes = Array.isArray(variant.imageModes) ? variant.imageModes : [];
+		if (supportedModes.length === 0) {
+			return res.status(400).json({ error: 'This model does not support reference images' });
+		}
+		resolvedImageMode = supportedModes.includes(image_mode) ? image_mode : supportedModes[0];
+
+		// 'frame' allows at most 2 (start/end); everything else up to maxRefImages.
+		const maxForMode = resolvedImageMode === 'frame' ? 2 : (variant.maxRefImages || 1);
+		if (ref_images.length > maxForMode) {
+			return res.status(400).json({
+				error: `Too many images for ${resolvedImageMode} mode (max ${maxForMode})`,
+			});
+		}
+
+		try {
+			refImageUrls = await uploadRefImages(ref_images, maxForMode);
+		} catch (upErr) {
+			logger.warn(`Ref image upload failed for user ${req.pocketbaseUserId}: ${upErr.message}`);
+			return res.status(400).json({ error: upErr.message || 'Invalid reference image' });
+		}
 	}
 
 	// Anti-abuse: enforce a rolling 24h cap on how many generations a user can
@@ -197,6 +239,8 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 				output_type: output_type || 'video',
 				credit_cost: creditCost,
 				share_token: randomBytes(16).toString('hex'),
+				...(resolvedImageMode && { mode_image: resolvedImageMode }),
+				...(refImageUrls.length > 0 && { ref_image_urls: JSON.stringify(refImageUrls) }),
 				...(idempotency_key && { idempotency_key }),
 			});
 
