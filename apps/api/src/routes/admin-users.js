@@ -3,6 +3,7 @@ import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { adminRoleCheck } from '../middleware/admin-role-check.js';
 import rateLimit from 'express-rate-limit';
+import { isPaidUser, clearUserTierCache } from '../utils/userTier.js';
 
 const router = Router();
 
@@ -16,13 +17,15 @@ const adminRateLimit = rateLimit({
 router.use(adminRateLimit);
 router.use(adminRoleCheck);
 
-function publicUser(u) {
+async function publicUser(u) {
+	const paid = await isPaidUser(u.id).catch(() => false);
 	return {
 		id: u.id,
 		email: u.email,
 		name: u.name,
 		role: u.role,
 		credits_balance: u.credits_balance ?? 0,
+		is_paid: paid,
 		banned_at: u.banned_at || null,
 		created: u.created,
 		updated: u.updated,
@@ -54,9 +57,7 @@ router.get('/', async (req, res) => {
 		} else if (filter === 'Banned') {
 			conditions.push('banned_at != null');
 		}
-		// Note: there is intentionally no plan/tier filter here. The users
-		// collection has no `plan` field. If/when one is added, restore it.
-
+		// Paid/Free filter: resolved after the DB query (isPaidUser checks transactions).
 		const filterStr = conditions.length ? conditions.join(' && ') : undefined;
 
 		const result = await pb.collection('users').getList(pageNum, limitNum, {
@@ -64,10 +65,18 @@ router.get('/', async (req, res) => {
 			sort: '-created',
 		});
 
+		// Resolve is_paid for each user (batched, uses the 60s cache in userTier.js).
+		let items = await Promise.all(result.items.map(publicUser));
+
+		// Post-filter for Paid/Free (can't do this in PocketBase since it's a
+		// derived field from the transactions collection).
+		if (filter === 'Paid') items = items.filter((u) => u.is_paid);
+		else if (filter === 'Free') items = items.filter((u) => !u.is_paid);
+
 		logger.info(`Fetched users page ${pageNum}`);
 
 		res.json({
-			users: result.items.map(publicUser),
+			users: items,
 			totalItems: result.totalItems,
 			totalPages: result.totalPages,
 			currentPage: result.page,
@@ -128,7 +137,7 @@ router.post('/:id/credits', async (req, res) => {
 			`Credits adjusted for user ${id}: ${amount} (reason: ${reason.trim()})`,
 		);
 
-		res.json({ user: publicUser(updatedUser) });
+		res.json({ user: await publicUser(updatedUser) });
 	} catch (error) {
 		logger.error('Adjust credits error:', error.message);
 		if (error?.status === 404 || error.message.includes('not found')) {
@@ -145,7 +154,7 @@ router.post('/:id/ban', async (req, res) => {
 			banned_at: new Date().toISOString(),
 		});
 		logger.info(`User banned: ${req.params.id}`);
-		res.json({ user: publicUser(updated) });
+		res.json({ user: await publicUser(updated) });
 	} catch (error) {
 		logger.error('Ban user error:', error.message);
 		if (error?.status === 404 || error.message.includes('not found')) {
@@ -162,9 +171,76 @@ router.post('/:id/unban', async (req, res) => {
 			banned_at: null,
 		});
 		logger.info(`User unbanned: ${req.params.id}`);
-		res.json({ user: publicUser(updated) });
+		res.json({ user: await publicUser(updated) });
 	} catch (error) {
 		logger.error('Unban user error:', error.message);
+		if (error?.status === 404 || error.message.includes('not found')) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		throw error;
+	}
+});
+
+// POST /admin/users/:id/grant-paid
+// Creates a purchase transaction for the user, marking them as "paid".
+// This is the manual equivalent of a real payment — used when a user has
+// paid via the manual UPI/WhatsApp flow and you want to unlock paid models.
+router.post('/:id/grant-paid', async (req, res) => {
+	const { id } = req.params;
+	const { reason } = req.body || {};
+	const note = (typeof reason === 'string' && reason.trim()) || 'Admin grant: manual payment';
+
+	try {
+		const user = await pb.collection('users').getOne(id);
+
+		// Idempotency: if already paid, just return the current state.
+		const alreadyPaid = await isPaidUser(id).catch(() => false);
+		if (alreadyPaid) {
+			return res.json({ user: await publicUser(user), already_paid: true });
+		}
+
+		// Create a purchase transaction — this is what isPaidUser() checks.
+		await pb.collection('transactions').create({
+			user_id: id,
+			type: 'purchase',
+			amount: 0,          // no credits added; this is purely a tier marker
+			balance_after: user.credits_balance ?? 0,
+			description: note,
+		});
+
+		clearUserTierCache(id);
+		logger.info(`Paid tier granted to user ${id} by admin (reason: ${note})`);
+		res.json({ user: await publicUser(user) });
+	} catch (error) {
+		logger.error('Grant paid error:', error.message);
+		if (error?.status === 404 || error.message.includes('not found')) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		throw error;
+	}
+});
+
+// POST /admin/users/:id/revoke-paid
+// Deletes all purchase transactions for the user, reverting them to free tier.
+// Credits balance is NOT changed — only the tier marker is removed.
+router.post('/:id/revoke-paid', async (req, res) => {
+	const { id } = req.params;
+
+	try {
+		const user = await pb.collection('users').getOne(id);
+
+		// Find and delete all purchase transactions for this user.
+		const purchases = await pb.collection('transactions').getFullList({
+			filter: `user_id = "${id}" && type = "purchase"`,
+		});
+
+		await Promise.all(purchases.map((tx) => pb.collection('transactions').delete(tx.id)));
+
+		clearUserTierCache(id);
+		logger.info(`Paid tier revoked for user ${id} by admin (${purchases.length} purchase tx removed)`);
+		res.json({ user: await publicUser(user), revoked: purchases.length });
+	} catch (error) {
+		logger.error('Revoke paid error:', error.message);
 		if (error?.status === 404 || error.message.includes('not found')) {
 			return res.status(404).json({ error: 'User not found' });
 		}
