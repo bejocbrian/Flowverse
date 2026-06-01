@@ -127,6 +127,7 @@ const SettingsPanel = ({
 	selectedModel,
 	selectedModelKey,
 	onSelectModel,
+	isPaid,
 	resolution,
 	onSelectResolution,
 	resolutions,
@@ -150,7 +151,15 @@ const SettingsPanel = ({
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (e) => {
-			if (panelRef.current && !panelRef.current.contains(e.target)) onClose();
+			if (!panelRef.current) return;
+			// Ignore clicks inside the panel.
+			if (panelRef.current.contains(e.target)) return;
+			// Ignore clicks inside Radix portaled content (e.g. the model
+			// dropdown), which renders OUTSIDE the panel via a portal. Without
+			// this, selecting a model would close the panel before the click
+			// registers - making the model unselectable.
+			if (e.target.closest?.('[data-radix-popper-content-wrapper]')) return;
+			onClose();
 		};
 		const onKeyDown = (e) => {
 			if (e.key === 'Escape') onClose();
@@ -237,7 +246,6 @@ const SettingsPanel = ({
 					<div className="flex bg-black/40 p-1 rounded-xl">
 						{resolutions.map((r) => {
 							const tag = r === '1080p' ? 'Full HD' : r === '720p' ? 'HD' : r === '480p' ? 'SD' : '';
-							const isLocked = r === '1080p'; // locked for free users (backend enforces)
 							return (
 								<button
 									key={r}
@@ -246,14 +254,7 @@ const SettingsPanel = ({
 										resolution === r ? 'bg-white text-black' : 'text-white/50 hover:text-white'
 									}`}
 								>
-									<span className="flex items-center gap-1">
-										{r}
-										{isLocked && (
-											<span className={`text-[8px] font-bold px-1 py-0.5 rounded ${resolution === r ? 'bg-black/10 text-black/60' : 'bg-white/10 text-white/40'}`}>
-												PRO
-											</span>
-										)}
-									</span>
+									<span>{r}</span>
 									{tag && (
 										<span className={`text-[9px] font-mono ${resolution === r ? 'text-black/50' : 'text-white/30'}`}>
 											{tag}
@@ -263,11 +264,6 @@ const SettingsPanel = ({
 							);
 						})}
 					</div>
-					{resolution === '1080p' && (
-						<p className="text-[11px] text-amber-400/70">
-							Full HD requires a credit purchase. Free accounts generate in 720p.
-						</p>
-					)}
 				</div>
 			)}
 
@@ -339,6 +335,7 @@ const SettingsPanel = ({
 						<div className="flex flex-col gap-1">
 							{models.map((m) => {
 								const active = m.key === selectedModelKey;
+								const locked = !isPaid && !m.freeAccess;
 								const priceMap = m.billing === 'per_second' ? m.creditsPerSecond : m.credits;
 								const vals = priceMap ? Object.values(priceMap) : [];
 								const minCr = vals.length ? Math.min(...vals) : null;
@@ -347,15 +344,26 @@ const SettingsPanel = ({
 								return (
 									<button
 										key={m.key}
-										onClick={() => onSelectModel(m)}
+										onClick={() => !locked && onSelectModel(m)}
+										disabled={locked}
+										title={locked ? 'Purchase credits to unlock this model' : undefined}
 										className={`w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-lg text-sm transition-colors text-left ${
-											active
+											locked
+												? 'opacity-40 cursor-not-allowed text-white/40'
+												: active
 												? 'bg-white/10 text-white'
 												: 'text-white/70 hover:text-white hover:bg-white/5'
 										}`}
 									>
 										<span className="flex flex-col min-w-0">
-											<span className="leading-tight truncate">{m.label}</span>
+											<span className="leading-tight truncate flex items-center gap-1.5">
+												{m.label}
+												{locked && (
+													<span className="text-[8px] font-bold px-1 py-0.5 rounded bg-white/10 text-white/50">
+														PRO
+													</span>
+												)}
+											</span>
 											<span className="text-[10px] text-white/40 font-mono truncate">
 												{m.provider}
 											</span>
@@ -366,7 +374,7 @@ const SettingsPanel = ({
 													{minCr === maxCr ? `${minCr}` : `${minCr}–${maxCr}`}{unit}
 												</span>
 											)}
-											{active && <Check className="w-4 h-4 text-white" />}
+											{active && !locked && <Check className="w-4 h-4 text-white" />}
 										</span>
 									</button>
 								);
@@ -408,6 +416,7 @@ const STAGES = ['Submitting…', 'Queued', 'Synthesizing frames…', 'Finalizing
 
 const GeneratePage = () => {
 	const { currentUser, refreshUser } = useAuth();
+	const isPaid = currentUser?.is_paid === true;
 	const [models, setModels] = useState([]);
 	const [modelsLoading, setModelsLoading] = useState(true);
 
@@ -454,11 +463,13 @@ const GeneratePage = () => {
 				const list = Array.isArray(data.models) ? data.models : [];
 				setModels(list);
 				if (list.length > 0) {
-					const first = list[0];
-					setSelectedModelKey(first.key);
-					setResolution(first.resolutions?.[0] || '720p');
-					if (first.durations?.length) {
-						setDuration(first.durations.includes(DEFAULT_DURATION) ? DEFAULT_DURATION : first.durations[0]);
+					// Default to the first model the user can actually use:
+					// free users default to a free-access model (Veo 3.1 Lite).
+					const accessible = list.find((m) => isPaid || m.freeAccess) || list[0];
+					setSelectedModelKey(accessible.key);
+					setResolution(accessible.resolutions?.[0] || '720p');
+					if (accessible.durations?.length) {
+						setDuration(accessible.durations.includes(DEFAULT_DURATION) ? DEFAULT_DURATION : accessible.durations[0]);
 					}
 				}
 			} catch (err) {
@@ -970,6 +981,7 @@ const GeneratePage = () => {
 									onSelectModel={(m) => {
 										setSelectedModelKey(m.key);
 									}}
+									isPaid={isPaid}
 									resolution={resolution}
 									onSelectResolution={setResolution}
 									resolutions={resolutions}

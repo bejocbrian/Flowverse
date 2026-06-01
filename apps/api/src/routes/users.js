@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
+import { isPaidUser } from '../utils/userTier.js';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ router.use(pocketbaseAuth);
 // Shape the user object consistently for the frontend. Include the fields
 // the web app reads (role, onboarding_completed, use_case, banned_at, etc.)
 // so it never needs to talk to PocketBase directly.
-function publicUser(u) {
+function publicUser(u, extra = {}) {
 	return {
 		id: u.id,
 		email: u.email,
@@ -25,6 +26,7 @@ function publicUser(u) {
 		verified: u.verified,
 		created: u.created,
 		updated: u.updated,
+		...extra,
 	};
 }
 
@@ -37,7 +39,9 @@ router.get('/me', async (req, res) => {
 	}
 	try {
 		const user = await pb.collection('users').getOne(req.pocketbaseUserId);
-		res.json({ user: publicUser(user) });
+		// is_paid drives model access in the UI (free users get Veo 3.1 Lite only).
+		const is_paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
+		res.json({ user: publicUser(user, { is_paid }) });
 	} catch (error) {
 		logger.error('Fetch me error:', error.message);
 		throw error;

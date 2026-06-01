@@ -138,14 +138,15 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 		return res.status(400).json({ error: 'Unknown or unavailable model' });
 	}
 
-	// Free users cannot generate in 1080p (Full HD). This saves vendor cost on
-	// free-tier abuse and incentivizes purchases.
-	if (quality === '1080p') {
+	// Model access tier: free users may only generate with models flagged
+	// `freeAccess` (currently Veo 3.1 Lite). Everything else needs a purchase.
+	// Both 720p and 1080p are allowed on the free model.
+	if (!variant.freeAccess) {
 		const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
 		if (!paid) {
 			return res.status(403).json({
-				error: 'Full HD (1080p) is available for paid users only. Purchase credits to unlock.',
-				code: 'HD_LOCKED',
+				error: 'This model is available for paid users only. Purchase credits to unlock all models.',
+				code: 'MODEL_LOCKED',
 			});
 		}
 	}

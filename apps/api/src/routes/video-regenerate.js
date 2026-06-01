@@ -8,6 +8,7 @@ import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
 import { getEnabledModels } from '../constants/models.js';
+import { isPaidUser } from '../utils/userTier.js';
 
 const router = Router();
 
@@ -78,6 +79,21 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 
 		const user = await pb.collection('users').getOne(req.pocketbaseUserId);
 		const isImage = video.output_type === 'image';
+
+		// Model access tier: regenerating reuses the source video's model, so a
+		// free user could otherwise re-run a paid model. Gate it the same way as
+		// fresh generation.
+		const regenVariant =
+			getEnabledModels().find((m) => m.id === video.model) || null;
+		if (!regenVariant || !regenVariant.freeAccess) {
+			const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
+			if (!paid) {
+				return res.status(403).json({
+					error: 'This model is available for paid users only. Purchase credits to unlock all models.',
+					code: 'MODEL_LOCKED',
+				});
+			}
+		}
 
 		const generationIds = [];
 
@@ -237,6 +253,16 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			null;
 		if (!variant) {
 			return res.status(400).json({ error: 'Source model is no longer available for extend' });
+		}
+		// Model access tier: free users can only extend free-access models.
+		if (!variant.freeAccess) {
+			const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
+			if (!paid) {
+				return res.status(403).json({
+					error: 'This model is available for paid users only. Purchase credits to unlock all models.',
+					code: 'MODEL_LOCKED',
+				});
+			}
 		}
 		let creditCost;
 		try {

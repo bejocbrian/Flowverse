@@ -98,6 +98,9 @@ export const MODEL_VARIANTS = [
 		aspectRatios: ['16:9', '9:16'],
 		imageModes: ['frame', 'ingredient'],
 		maxRefImages: 3,
+		// The ONLY model free users can generate with (both 720p & 1080p).
+		// All other models require a credit purchase.
+		freeAccess: true,
 		routed: true,
 		enabled: true,
 	},
