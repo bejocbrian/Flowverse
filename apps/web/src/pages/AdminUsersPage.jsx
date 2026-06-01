@@ -103,11 +103,19 @@ const AdminUsersPage = () => {
         body: JSON.stringify({ amount: signedAmount, reason: creditReason.trim() }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         toast(creditAction === 'add' ? 'Credits added' : 'Credits deducted');
         setCreditModalOpen(false);
         setCreditAmount('');
         setCreditReason('');
-        fetchUsers();
+        // Update the specific user row in local state immediately so the
+        // table reflects the new balance without a full re-fetch (which can
+        // show stale data if PocketBase hasn't propagated the write yet).
+        if (data.user) {
+          setUsers((prev) => prev.map((u) => u.id === data.user.id ? { ...u, ...data.user } : u));
+        } else {
+          fetchUsers();
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         toast(err.error || 'Failed to adjust credits');
@@ -144,7 +152,12 @@ const AdminUsersPage = () => {
           toast(paidAction === 'grant' ? 'Paid tier granted' : 'Paid tier revoked');
         }
         setPaidModalOpen(false);
-        fetchUsers();
+        // Update the specific user row immediately.
+        if (data.user) {
+          setUsers((prev) => prev.map((u) => u.id === data.user.id ? { ...u, ...data.user } : u));
+        } else {
+          fetchUsers();
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         toast(err.error || `Failed to ${paidAction} paid tier`);

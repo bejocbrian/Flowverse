@@ -114,9 +114,11 @@ router.post('/:id/credits', async (req, res) => {
 		});
 
 		// `transactions.type` only allows: purchase | generation | refund.
-		// Admin grants map to `purchase`; admin debits map to `refund` (negative
-		// amount), which keeps the audit trail consistent with the schema.
-		const txType = amount > 0 ? 'purchase' : 'refund';
+		// Admin credit adjustments always use `refund` (positive = admin grant,
+		// negative = admin deduction). We deliberately do NOT use `purchase` here
+		// because that would incorrectly mark the user as "paid" tier. Use the
+		// dedicated /grant-paid endpoint to explicitly grant paid access.
+		const txType = 'refund';
 
 		try {
 			await pb.collection('transactions').create({
