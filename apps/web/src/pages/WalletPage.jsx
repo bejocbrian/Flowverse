@@ -16,11 +16,12 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
-// TEMPORARY: automated checkout disabled while payment verification is pending.
-// These gateway buttons are kept (commented) for quick restoration later.
+import usePublicSettings from '@/hooks/usePublicSettings.js';
+import ManualPaymentPanel from '@/components/ManualPaymentPanel.jsx';
+// Automated checkout buttons — uncomment when gateway is live:
 // import CashfreeCheckoutButton from '@/components/CashfreeCheckoutButton.jsx';
 // import PaytmCheckoutButton from '@/components/PaytmCheckoutButton.jsx';
-import ManualPaymentPanel from '@/components/ManualPaymentPanel.jsx';
+// import StripeCheckoutButton from '@/components/StripeCheckoutButton.jsx';
 
 // Credit packs are loaded from the server (/cashfree/packs) so price and
 // credits always match what the server will charge. No hardcoded prices here.
@@ -30,13 +31,18 @@ import ManualPaymentPanel from '@/components/ManualPaymentPanel.jsx';
 /* -------------------------------------------------------------------------- */
 
 // `generation` charges credits (negative effect on balance).
-// `purchase`, `bonus`, `refund` add credits.
+// `purchase`, `bonus`, `refund` normally add credits.
+// IMPORTANT: admin credit adjustments are stored as a `refund` with a SIGNED
+// amount (negative = admin deduction), so the direction must respect the sign
+// of the amount, not the type alone — otherwise a deduction shows as a +credit.
 const CREDIT_TYPES = new Set(['purchase', 'bonus', 'refund']);
 const DEBIT_TYPES = new Set(['generation']);
 
-function txDirection(type) {
-	if (CREDIT_TYPES.has(type)) return 'credit';
+function txDirection(type, amount = 0) {
 	if (DEBIT_TYPES.has(type)) return 'debit';
+	// A negative amount always means credits left the wallet (admin deduction).
+	if (amount < 0) return 'debit';
+	if (CREDIT_TYPES.has(type)) return 'credit';
 	return 'unknown';
 }
 
@@ -66,7 +72,12 @@ function timeAgo(iso) {
 /* -------------------------------------------------------------------------- */
 
 const WalletPage = () => {
-	const { currentUser } = useAuth();
+	const { currentUser, refreshUser } = useAuth();
+	const { settings: publicSettings } = usePublicSettings();
+	const paymentMethods = publicSettings.payment_methods;
+	const manualPaymentEnabled = paymentMethods.manual_payment_enabled !== false;
+	const anyAutoEnabled = paymentMethods.stripe || paymentMethods.cashfree || paymentMethods.paytm;
+
 	const [transactions, setTransactions] = useState([]);
 	const [loading, setLoading] = useState(true);
 	const [tab, setTab] = useState('overview'); // 'overview' | 'buy'
@@ -108,6 +119,9 @@ const WalletPage = () => {
 		(async () => {
 			setLoading(true);
 			try {
+				// Refresh the user's balance from the server first so the balance
+				// card always shows the current value (admin adjustments, etc.).
+				await refreshUser().catch(() => {});
 				const res = await apiServerClient.fetch('/wallet/balance');
 				if (!res.ok) throw new Error('Failed to load wallet');
 				const data = await res.json();
@@ -128,7 +142,7 @@ const WalletPage = () => {
 		let totalSpent = 0;
 		let totalEarned = 0;
 		for (const t of transactions) {
-			const dir = txDirection(t.type);
+			const dir = txDirection(t.type, t.amount || 0);
 			const amount = Math.abs(t.amount || 0);
 			if (dir === 'credit') totalEarned += amount;
 			else if (dir === 'debit') totalSpent += amount;
@@ -222,121 +236,32 @@ const WalletPage = () => {
 					</div>
 
 					{tab === 'buy' ? (
-						/*
-						 * TEMPORARY: automated checkout (Stripe / Cashfree / Paytm) is
-						 * disabled while business/payment verification is pending. We
-						 * show a manual UPI-QR + WhatsApp flow instead so users can still
-						 * top up and we credit them by hand.
-						 *
-						 * TO RESTORE AUTOMATED CHECKOUT: delete the <ManualPaymentPanel/>
-						 * line below and uncomment the "AUTOMATED CHECKOUT" IIFE that
-						 * follows it. No other changes needed - the gateway components and
-						 * server routes are still in place.
-						 */
-						<ManualPaymentPanel packs={packs} videoUnitCredits={videoUnitCredits} />
-					) : /* ---------- AUTOMATED CHECKOUT (disabled, keep for restore) ----------
-					tab === 'buy' ? (
-						(() => {
-							const stripeOn = paymentMethods.stripe;
-							const cashfreeOn = paymentMethods.cashfree;
-							const paytmOn = paymentMethods.paytm;
-							const inrOn = cashfreeOn || paytmOn;
-
-							if (!stripeOn && !inrOn) {
-								return (
-									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
-										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
-										<h2 className="text-lg font-semibold mb-1">Payments are paused</h2>
-										<p className="text-sm text-white/50">
-											Buying credits is temporarily unavailable. Please try again later.
-										</p>
-									</div>
-								);
-							}
-
-							if (!inrOn) {
-								// Stripe-only fallback isn't wired to the server pack
-								// table yet; the INR providers are the production path.
-								return (
-									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
-										<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
-										<h2 className="text-lg font-semibold mb-1">Card checkout unavailable</h2>
-										<p className="text-sm text-white/50">
-											Please use UPI / cards (INR) checkout, or try again later.
-										</p>
-									</div>
-								);
-							}
-
-							if (packs.length === 0) {
-								return (
-									<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
-										<Loader2 className="w-6 h-6 animate-spin text-white/40" />
-									</div>
-								);
-							}
-
-							return (
-								<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-									{packs.map((pack) => {
-										const popular = Boolean(pack.badge);
-										const perCredit = (pack.priceINR / pack.credits).toFixed(2);
-										return (
-											<motion.div
-												key={pack.id}
-												initial={{ opacity: 0, y: 12 }}
-												whileInView={{ opacity: 1, y: 0 }}
-												viewport={{ once: true }}
-												className={`relative bg-white/[0.03] border rounded-2xl p-7 flex flex-col ${
-													popular
-														? 'border-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
-														: 'border-white/10'
-												}`}
-											>
-												{pack.badge && (
-													<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white whitespace-nowrap">
-														{pack.badge}
-													</div>
-												)}
-												<h3 className="text-sm font-semibold uppercase tracking-wider text-white/60 capitalize">
-													{pack.id}
-												</h3>
-												<div className="mt-3 mb-1 flex items-baseline gap-2">
-													<span className="text-5xl font-bold tracking-tight">{pack.credits}</span>
-													<span className="text-sm text-white/40">credits</span>
-												</div>
-												<p className="text-2xl font-semibold mt-4">₹{pack.priceINR}</p>
-												<p className="text-xs text-white/40 mt-0.5 mb-6">
-													₹{perCredit} per credit
-												</p>
-												<div className="mt-auto flex flex-col gap-2">
-													{cashfreeOn && (
-														<CashfreeCheckoutButton
-															packId={pack.id}
-															popular={popular}
-															mode={paymentMethods.cashfree_mode}
-															className="w-full"
-														>
-															{paytmOn ? 'Pay with UPI / Card' : 'Buy now'}
-														</CashfreeCheckoutButton>
-													)}
-													{paytmOn && (
-														<PaytmCheckoutButton
-															packId={pack.id}
-															popular={popular && !cashfreeOn}
-															className="w-full"
-														>
-															Pay with Paytm
-														</PaytmCheckoutButton>
-													)}
-												</div>
-											</motion.div>
-										);
-									})}
-								</div>
-							);
-						})()
-					) : ---------- END AUTOMATED CHECKOUT ---------- */ loading ? (
+						manualPaymentEnabled ? (
+							// Manual payment mode: UPI QR + WhatsApp flow.
+							// Shown while automated gateway is pending approval.
+							// Turn off via Admin → Settings → Payments → "Manual Payment".
+							<ManualPaymentPanel packs={packs} videoUnitCredits={videoUnitCredits} />
+						) : anyAutoEnabled ? (
+							// Automated checkout (Stripe / Cashfree / Paytm).
+							// Uncomment and wire up the gateway button components here
+							// once your gateway is approved and the toggle above is off.
+							<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+								<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
+								<h2 className="text-lg font-semibold mb-1">Automated checkout</h2>
+								<p className="text-sm text-white/50">
+									Gateway checkout is enabled. Wire up the checkout button components to complete the integration.
+								</p>
+							</div>
+						) : (
+							<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 text-center">
+								<CreditCard className="w-8 h-8 mx-auto text-white/40 mb-3" />
+								<h2 className="text-lg font-semibold mb-1">Payments are paused</h2>
+								<p className="text-sm text-white/50">
+									Buying credits is temporarily unavailable. Please check back soon.
+								</p>
+							</div>
+						)
+					) : loading ? (
 						<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-10 flex items-center justify-center">
 							<Loader2 className="w-6 h-6 animate-spin text-white/40" />
 						</div>
@@ -365,7 +290,7 @@ const WalletPage = () => {
 										accent: 'text-white/60',
 									};
 									const Icon = meta.icon;
-									const dir = txDirection(t.type);
+									const dir = txDirection(t.type, t.amount || 0);
 									const amount = Math.abs(t.amount || 0);
 									const sign = dir === 'credit' ? '+' : dir === 'debit' ? '−' : '';
 									const amountColor =

@@ -153,7 +153,10 @@ const DashboardPage = () => {
 		return 'Working late';
 	}, []);
 
-	const balance = currentUser?.credits_balance ?? 0;
+	// Prefer the balance from the analytics overview (fetched fresh from the
+	// server on mount) over the cached authStore value, so admin credit
+	// adjustments are reflected without a full reload.
+	const balance = overview?.balance ?? currentUser?.credits_balance ?? 0;
 	const isEmpty = !loading && (overview?.generations?.total ?? 0) === 0;
 
 	return (
@@ -308,7 +311,11 @@ const DashboardPage = () => {
 							) : (
 								<div className="bg-white/[0.03] border border-white/10 rounded-2xl divide-y divide-white/5 overflow-hidden">
 									{recent.transactions.slice(0, 5).map((t) => {
-										const isCharge = t.type === 'generation';
+										// A charge is either a generation debit or any
+										// negative-amount entry (e.g. an admin deduction,
+										// stored as a negative `refund`).
+										const amt = t.amount || 0;
+										const isCharge = t.type === 'generation' || amt < 0;
 										const sign = isCharge ? '−' : '+';
 										const cls = isCharge ? 'text-amber-300' : 'text-emerald-300';
 										return (

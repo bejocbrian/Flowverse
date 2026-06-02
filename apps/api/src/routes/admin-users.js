@@ -126,6 +126,10 @@ router.post('/:id/credits', async (req, res) => {
 				type: txType,
 				amount,
 				balance_after: newBalance,
+				// Persist the admin's reason so it shows in the user's wallet
+				// history and serves as an audit trail. Prefix makes the source
+				// of the adjustment unambiguous (vs a real payment refund).
+				description: `${amount < 0 ? 'Admin deduction' : 'Admin credit'}: ${reason.trim()}`,
 			});
 		} catch (txError) {
 			// Don't roll back the credit change just because the audit row
@@ -202,17 +206,22 @@ router.post('/:id/grant-paid', async (req, res) => {
 		}
 
 		// Create a purchase transaction — this is what isPaidUser() checks.
+		// amount=1 is a nominal tier-marker; PocketBase's required number field
+		// rejects 0 as falsy, so we use 1 (no credits are actually added to
+		// the balance — balance_after equals the current balance unchanged).
 		await pb.collection('transactions').create({
 			user_id: id,
 			type: 'purchase',
-			amount: 0,          // no credits added; this is purely a tier marker
+			amount: 1,
 			balance_after: user.credits_balance ?? 0,
 			description: note,
 		});
 
 		clearUserTierCache(id);
 		logger.info(`Paid tier granted to user ${id} by admin (reason: ${note})`);
-		res.json({ user: await publicUser(user) });
+		// Re-fetch user so the response reflects the just-created purchase tx.
+		const updatedUser = await pb.collection('users').getOne(id);
+		res.json({ user: await publicUser(updatedUser) });
 	} catch (error) {
 		logger.error('Grant paid error:', error.message);
 		if (error?.status === 404 || error.message.includes('not found')) {

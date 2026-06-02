@@ -47,7 +47,7 @@ const limiter = rateLimit({
 		error: 'You are generating too quickly. Please wait a moment before trying again, or purchase credits for higher limits.',
 		code: 'RATE_LIMITED',
 	},
-	validate: { trustProxy: false },
+	validate: { trustProxy: false, keyGeneratorIpFallback: false },
 });
 
 /**

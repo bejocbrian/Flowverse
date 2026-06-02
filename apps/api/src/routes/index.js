@@ -8,6 +8,7 @@ import usersRouter from './users.js';
 import stripeRouter from './stripe.js';
 import cashfreeRouter from './cashfree.js';
 import cashfreeWebhookRouter from './cashfree-webhook.js';
+import stripeWebhookRouter from './stripe-webhook.js';
 import paytmRouter from './paytm.js';
 import paytmWebhookRouter from './paytm-webhook.js';
 import walletRouter from './wallet.js';
@@ -49,6 +50,7 @@ export default () => {
 	router.use('/wallet', walletRouter);
 	router.use('/webhooks', webhooksRouter);
 	router.use('/webhooks', cashfreeWebhookRouter);
+	router.use('/webhooks', stripeWebhookRouter);
 	router.use('/webhooks', paytmWebhookRouter);
 	router.use('/settings', settingsRouter);
 	router.use('/prompts', promptHistoryRouter);

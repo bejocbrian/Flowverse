@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { Switch } from '@/components/ui/switch.jsx';
-import { Palette, PlaySquare, CreditCard, Activity, Save, Settings2, Clock, Layers } from 'lucide-react';
+import { Palette, PlaySquare, CreditCard, Activity, Save, Settings2, Clock, Layers, MessageCircle } from 'lucide-react';
 import apiServerClient from '@/lib/apiServerClient.js';
 import { toast } from 'sonner';
 
@@ -373,6 +373,35 @@ const AdminSettingsPage = () => {
                 </p>
 
                 <div className="space-y-4">
+                  {/* Manual payment toggle — shown first, most prominent */}
+                  <div className={`flex items-center justify-between p-4 rounded-lg border ${
+                    settings.manual_payment_enabled !== false
+                      ? 'bg-amber-500/10 border-amber-500/30'
+                      : 'bg-[hsl(var(--elevated))] border-[hsl(var(--admin-border))]'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <MessageCircle className={`w-5 h-5 ${settings.manual_payment_enabled !== false ? 'text-amber-400' : 'text-white/40'}`} />
+                      <div>
+                        <Label className="text-white font-medium">Manual Payment (UPI + WhatsApp)</Label>
+                        <p className="text-[hsl(var(--text-secondary))] text-sm">
+                          Shows the UPI QR + WhatsApp flow on the wallet page. Turn this off once your payment gateway is approved and live.
+                        </p>
+                        {settings.manual_payment_enabled !== false && (
+                          <p className="text-amber-400/80 text-xs mt-1 font-mono">
+                            ⚠ Manual mode is active — users are directed to pay via UPI and contact you on WhatsApp for credit activation.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.manual_payment_enabled !== false}
+                      onCheckedChange={(checked) => updateSetting('manual_payment_enabled', checked)}
+                    />
+                  </div>
+
+                  <div className="border-t border-[hsl(var(--admin-border))] my-2" />
+                  <p className="text-[hsl(var(--text-secondary))] text-xs font-mono uppercase tracking-wider">Automated gateways</p>
+
                   <div className="flex items-center justify-between p-4 bg-[hsl(var(--elevated))] rounded-lg border border-[hsl(var(--admin-border))]">
                     <div className="flex items-center gap-3">
                       <CreditCard className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
@@ -384,7 +413,7 @@ const AdminSettingsPage = () => {
                       </div>
                     </div>
                     <Switch
-                      checked={settings.payment_stripe_enabled !== false}
+                      checked={settings.payment_stripe_enabled === true}
                       onCheckedChange={(checked) => updateSetting('payment_stripe_enabled', checked)}
                     />
                   </div>

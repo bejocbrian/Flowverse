@@ -26,6 +26,11 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(pb.authStore.model);
       setIsAuthenticated(true);
       setRole(pb.authStore.model.role || 'consumer');
+      // The cached authStore record can be stale (e.g. credits_balance after an
+      // admin adjustment) and is missing server-derived fields like is_paid
+      // (which gates paid models). Re-fetch the canonical record once on entry
+      // so balance + paid-tier are always accurate. Best-effort: ignore errors.
+      refreshUser().catch(() => {});
     }
     setInitialLoading(false);
   }, []);
@@ -84,6 +89,10 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(data.user);
       setIsAuthenticated(true);
       setRole(data.user.role || 'consumer');
+      // The login payload omits server-derived fields like is_paid (paid-model
+      // gating) and may carry a slightly stale balance. Hydrate the canonical
+      // record so paid users get paid access right away. Best-effort.
+      refreshUser().catch(() => {});
       return data;
     } catch (error) {
       console.error('Login error:', error);

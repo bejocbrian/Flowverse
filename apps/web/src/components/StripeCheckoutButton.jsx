@@ -5,7 +5,11 @@ import apiServerClient from '@/lib/apiServerClient.js';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
-const StripeCheckoutButton = ({ creditAmount, price, popular, className }) => {
+// StripeCheckoutButton now only requires a `packId` — the server derives the
+// price and credit amount from its own pack catalog. We never send price/amount
+// from the client, which prevents clients from charging themselves ₹1 for the
+// largest pack.
+const StripeCheckoutButton = ({ packId, popular, className }) => {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
@@ -14,23 +18,19 @@ const StripeCheckoutButton = ({ creditAmount, price, popular, className }) => {
       const response = await apiServerClient.fetch('/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creditAmount,
-          price,
-          successUrl: window.location.origin + '/app/wallet/success?session_id={CHECKOUT_SESSION_ID}',
-          cancelUrl: window.location.origin + '/app/wallet/cancel'
-        })
+        body: JSON.stringify({ packId })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create checkout session');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create checkout session');
       }
 
       const data = await response.json();
       window.open(data.url, '_blank');
     } catch (error) {
       console.error('Checkout error:', error);
-      toast('Failed to initialize checkout. Please try again.');
+      toast(error.message || 'Failed to initialize checkout. Please try again.');
     } finally {
       setLoading(false);
     }
