@@ -440,7 +440,7 @@ const GeneratePage = () => {
 	const [loading, setLoading] = useState(false);
 	const [stage, setStage] = useState(0);
 	const [progress, setProgress] = useState(0);
-	const [generatedResult, setGeneratedResult] = useState(null); // { type, url, thumbnail }
+	const [generatedResult, setGeneratedResult] = useState(null); // { type, url, thumbnail, aspectRatio }
 	// The DB id of the last completed video, used for the Extend action.
 	const [lastVideoId, setLastVideoId] = useState(null);
 	const [extendOpen, setExtendOpen] = useState(false);
@@ -640,7 +640,12 @@ const GeneratePage = () => {
 						stopPolling();
 						setStage(3);
 						setProgress(100);
-						setGeneratedResult({ type: 'video', url: data.video_url, thumbnail: data.thumbnail_url || null });
+						setGeneratedResult({
+							type: 'video',
+							url: data.video_url,
+							thumbnail: data.thumbnail_url || null,
+							aspectRatio: data.aspect_ratio || '16:9',
+						});
 						setLastVideoId(videoId);
 						setLoading(false);
 						refreshUser();
@@ -936,14 +941,14 @@ const GeneratePage = () => {
 							<motion.div
 								initial={{ opacity: 0, scale: 0.98 }}
 								animate={{ opacity: 1, scale: 1 }}
-								className="w-full max-w-4xl mt-6"
+								className={`w-full mt-6 ${generatedResult.aspectRatio === '9:16' ? 'max-w-sm' : 'max-w-4xl'}`}
 							>
 								<div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl group bg-black">
 									{/* Thumbnail shown until video loads */}
 									<VideoPlayer
 										src={generatedResult.url}
 										poster={generatedResult.thumbnail || undefined}
-										className="w-full aspect-video"
+										className={`w-full ${generatedResult.aspectRatio === '9:16' ? 'aspect-[9/16] max-h-[80vh]' : 'aspect-video'}`}
 									/>
 									{/* Thumbnail overlay badge */}
 									{generatedResult.thumbnail && (

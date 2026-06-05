@@ -128,6 +128,7 @@ async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
 				await pb.collection('videos').update(videoRecord.id, {
 					status: 'completed',
 					video_url: mediaUrl || '',
+					thumbnail_url: status.thumbnail_url || '',
 					completed_at: new Date().toISOString(),
 					webhook_data: JSON.stringify(status.raw),
 				});

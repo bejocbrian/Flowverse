@@ -426,6 +426,7 @@ router.get('/:id/status', async (req, res) => {
 			thumbnail_url: video.thumbnail_url,
 			error_message: video.error_message,
 			output_type: video.output_type || 'video',
+			aspect_ratio: video.aspect_ratio || '16:9',
 		});
 	} catch (error) {
 		logger.error('Status check error:', error.message);
