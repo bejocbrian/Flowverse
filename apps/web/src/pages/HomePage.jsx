@@ -144,7 +144,7 @@ const FAQS = [
 	},
 	{
 		q: 'How are credits priced?',
-		a: 'Credits scale with duration and quality. A short HD clip costs less than a long Full HD one. The cost is shown before you generate.',
+		a: 'Credits are sold in one-time packs — no subscription. Trial (₹49, 125 cr), Mini (₹99, 300 cr), Creator (₹299, 1,000 cr), Pro (₹649, 2,500 cr), Studio (₹1,299, 5,500 cr). Each video costs 15 credits on the free Veo 3.1 Lite model. Premium models use more. Credits never expire.',
 	},
 	{
 		q: 'Can I cancel anytime?',
@@ -609,40 +609,66 @@ const Testimonials = () => (
 
 const PRICING = [
 	{
-		tier: 'Free',
-		price: '0',
+		tier: 'Trial',
+		price: '49',
+		currency: '₹',
+		credits: 125,
+		videos: 8,
 		blurb: 'Try the workflow.',
 		cta: 'Get started',
 		variant: 'outline',
-		features: ['Free credits to start', '720p export', 'Short clips', 'Watermark'],
+		features: ['125 credits', '≈ 8 videos', 'Veo 3.1 Lite (720p & 1080p)', 'No subscription'],
 	},
 	{
-		tier: 'Pro',
-		price: '29',
+		tier: 'Creator',
+		price: '299',
+		currency: '₹',
+		credits: 1000,
+		videos: 66,
 		blurb: 'For working creators.',
-		cta: 'Start Pro',
+		cta: 'Buy Creator',
 		variant: 'default',
 		highlighted: true,
 		features: [
-			'1,000 credits / month',
-			'720p and 1080p',
-			'Longer durations',
-			'Priority queue',
+			'1,000 credits',
+			'≈ 66 videos',
+			'All models unlocked',
+			'720p & 1080p',
+			'No watermark',
+		],
+	},
+	{
+		tier: 'Pro',
+		price: '649',
+		currency: '₹',
+		credits: 2500,
+		videos: 166,
+		blurb: 'Ship at scale.',
+		cta: 'Buy Pro',
+		variant: 'outline',
+		features: [
+			'2,500 credits',
+			'≈ 166 videos',
+			'All models unlocked',
+			'720p & 1080p',
 			'No watermark',
 		],
 	},
 	{
 		tier: 'Studio',
-		price: '99',
+		price: '1299',
+		currency: '₹',
+		credits: 5500,
+		videos: 366,
 		blurb: 'For teams shipping at scale.',
-		cta: 'Talk to us',
+		cta: 'Buy Studio',
 		variant: 'outline',
 		features: [
-			'5,000 credits / month',
-			'All resolutions',
-			'Custom durations',
-			'Team workspaces',
-			'API access',
+			'5,500 credits',
+			'≈ 366 videos',
+			'All models unlocked',
+			'720p & 1080p',
+			'No watermark',
 		],
 	},
 ];
@@ -652,11 +678,30 @@ const Pricing = () => (
 		<div className="max-w-7xl mx-auto">
 			<SectionHeader
 				eyebrow="PRICING"
-				title="Simple plans, scale when you need to"
-				sub="Cancel anytime. Credits roll within the billing cycle."
+				title="Pay once, use when you need"
+				sub="No subscriptions. Credits never expire. Top up any time."
 			/>
 
-			<div className="grid md:grid-cols-3 gap-4 lg:gap-6">
+			{/* Free tier callout */}
+			<motion.div
+				initial={{ opacity: 0, y: 12 }}
+				whileInView={{ opacity: 1, y: 0 }}
+				viewport={{ once: true }}
+				transition={{ duration: 0.4 }}
+				className="max-w-2xl mx-auto mb-10 glass-surface rounded-2xl px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4"
+			>
+				<div>
+					<span className="text-sm font-semibold text-white">Free to try</span>
+					<p className="text-sm text-[hsl(var(--text-muted))] mt-0.5">
+						Sign up and get <span className="text-white font-semibold">80 free credits</span> — enough for 5 videos with Veo 3.1 Lite. No card required.
+					</p>
+				</div>
+				<Link to="/signup" className="shrink-0">
+					<Button variant="outline" size="sm">Get free credits</Button>
+				</Link>
+			</motion.div>
+
+			<div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
 				{PRICING.map((p, i) => (
 					<motion.div
 						key={p.tier}
@@ -665,24 +710,29 @@ const Pricing = () => (
 						viewport={{ once: true }}
 						transition={{ duration: 0.4, delay: i * 0.08 }}
 						className={[
-							'relative glass-surface rounded-2xl p-7 flex flex-col',
+							'relative glass-surface rounded-2xl p-6 flex flex-col',
 							p.highlighted
 								? 'ring-1 ring-[hsl(var(--accent-primary))]/50 shadow-glow-primary'
 								: '',
 						].join(' ')}
 					>
 						{p.highlighted && (
-							<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white">
+							<div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider bg-[hsl(var(--accent-primary-container))] text-white whitespace-nowrap">
 								Most popular
 							</div>
 						)}
-						<h3 className="text-xl font-semibold mb-1">{p.tier}</h3>
-						<p className="text-sm text-[hsl(var(--text-muted))] mb-5">{p.blurb}</p>
-						<div className="flex items-baseline gap-1 mb-6">
-							<span className="text-5xl font-bold tracking-tight">${p.price}</span>
-							<span className="text-[hsl(var(--text-muted))]">/mo</span>
+						<h3 className="text-lg font-semibold mb-1">{p.tier}</h3>
+						<p className="text-xs text-[hsl(var(--text-muted))] mb-4">{p.blurb}</p>
+
+						{/* Price */}
+						<div className="flex items-baseline gap-1 mb-1">
+							<span className="text-4xl font-bold tracking-tight">{p.currency}{p.price}</span>
 						</div>
-						<ul className="space-y-3 mb-8 flex-1">
+						<p className="text-xs text-[hsl(var(--text-muted))] mb-5">
+							<span className="text-white font-semibold">{p.credits.toLocaleString()}</span> credits &nbsp;·&nbsp; ≈ {p.videos} videos
+						</p>
+
+						<ul className="space-y-2.5 mb-7 flex-1">
 							{p.features.map((f) => (
 								<li key={f} className="flex items-start gap-2 text-sm">
 									<Check className="w-4 h-4 mt-0.5 text-[hsl(var(--accent-secondary))] shrink-0" />
@@ -698,6 +748,11 @@ const Pricing = () => (
 					</motion.div>
 				))}
 			</div>
+
+			<p className="text-center text-xs text-[hsl(var(--text-muted))] mt-6">
+				Video estimate based on Veo 3.1 Lite (15 cr/video). Premium models use more credits.
+				&nbsp;·&nbsp; ₹ prices · GST may apply.
+			</p>
 		</div>
 	</section>
 );
