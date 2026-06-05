@@ -440,7 +440,7 @@ const GeneratePage = () => {
 	const [loading, setLoading] = useState(false);
 	const [stage, setStage] = useState(0);
 	const [progress, setProgress] = useState(0);
-	const [generatedResult, setGeneratedResult] = useState(null);
+	const [generatedResult, setGeneratedResult] = useState(null); // { type, url, thumbnail }
 	// The DB id of the last completed video, used for the Extend action.
 	const [lastVideoId, setLastVideoId] = useState(null);
 	const [extendOpen, setExtendOpen] = useState(false);
@@ -640,7 +640,7 @@ const GeneratePage = () => {
 						stopPolling();
 						setStage(3);
 						setProgress(100);
-						setGeneratedResult({ type: 'video', url: data.video_url });
+						setGeneratedResult({ type: 'video', url: data.video_url, thumbnail: data.thumbnail_url || null });
 						setLastVideoId(videoId);
 						setLoading(false);
 						refreshUser();
@@ -862,22 +862,70 @@ const GeneratePage = () => {
 						{/* Loading state with stages */}
 						{loading && (
 							<div className="w-full max-w-xl mt-16 sm:mt-24">
-								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-6 flex flex-col items-center text-center">
-									<Loader2 className="w-8 h-8 mb-4 animate-spin text-[hsl(var(--accent-primary))]" />
-									<p className="text-sm uppercase tracking-[0.2em] text-white/50 font-mono mb-2">
-										{STAGES[Math.min(stage, STAGES.length - 1)]}
-									</p>
-									<p className="text-2xl font-mono font-semibold mb-5">{progress}%</p>
-									<div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-8 flex flex-col items-center text-center">
+									{/* Animated ring */}
+									<div className="relative w-16 h-16 mb-6">
+										<svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">
+											<circle
+												cx="32" cy="32" r="28"
+												fill="none"
+												stroke="rgba(255,255,255,0.08)"
+												strokeWidth="4"
+											/>
+											<motion.circle
+												cx="32" cy="32" r="28"
+												fill="none"
+												stroke="hsl(var(--accent-primary))"
+												strokeWidth="4"
+												strokeLinecap="round"
+												strokeDasharray={`${2 * Math.PI * 28}`}
+												strokeDashoffset={`${2 * Math.PI * 28 * (1 - progress / 100)}`}
+												transition={{ duration: 0.5 }}
+											/>
+										</svg>
+										<div className="absolute inset-0 flex items-center justify-center">
+											<span className="text-sm font-mono font-semibold text-white">{progress}%</span>
+										</div>
+									</div>
+
+									{/* Animated stage label */}
+									<AnimatePresence mode="wait">
+										<motion.p
+											key={stage}
+											initial={{ opacity: 0, y: 6 }}
+											animate={{ opacity: 1, y: 0 }}
+											exit={{ opacity: 0, y: -6 }}
+											transition={{ duration: 0.2 }}
+											className="text-xs uppercase tracking-[0.2em] text-white/50 font-mono mb-4"
+										>
+											{STAGES[Math.min(stage, STAGES.length - 1)]}
+										</motion.p>
+									</AnimatePresence>
+
+									{/* Progress bar */}
+									<div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mb-5">
 										<motion.div
 											className="h-full bg-gradient-to-r from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))]"
 											initial={{ width: 0 }}
 											animate={{ width: `${progress}%` }}
-											transition={{ duration: 0.4 }}
+											transition={{ duration: 0.5 }}
 										/>
 									</div>
-									<p className="text-xs text-white/40 mt-4">
-										You can leave this page - your video will keep rendering.
+
+									{/* Animated dots */}
+									<div className="flex items-center gap-1.5 mb-4">
+										{[0, 1, 2].map((i) => (
+											<motion.div
+												key={i}
+												className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--accent-primary))]"
+												animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.2, 0.8] }}
+												transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+											/>
+										))}
+									</div>
+
+									<p className="text-xs text-white/30">
+										You can leave this page — your video will keep rendering.
 									</p>
 								</div>
 							</div>
@@ -891,7 +939,19 @@ const GeneratePage = () => {
 								className="w-full max-w-4xl mt-6"
 							>
 								<div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl group bg-black">
-									<VideoPlayer src={generatedResult.url} className="w-full aspect-video" />
+									{/* Thumbnail shown until video loads */}
+									<VideoPlayer
+										src={generatedResult.url}
+										poster={generatedResult.thumbnail || undefined}
+										className="w-full aspect-video"
+									/>
+									{/* Thumbnail overlay badge */}
+									{generatedResult.thumbnail && (
+										<div className="absolute top-3 left-3 px-2 py-1 rounded-full bg-black/60 backdrop-blur-sm text-[10px] font-mono text-white/60 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+											<span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+											Ready
+										</div>
+									)}
 									<button
 										onClick={handleClear}
 										className="absolute top-3 right-3 p-2 bg-black/60 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/80 text-white"
@@ -900,6 +960,21 @@ const GeneratePage = () => {
 										<Trash2 className="w-4 h-4" />
 									</button>
 								</div>
+
+								{/* Thumbnail strip — shows the still frame separately below the player */}
+								{generatedResult.thumbnail && (
+									<div className="mt-3 flex items-center gap-3 px-1">
+										<img
+											src={generatedResult.thumbnail}
+											alt="Video thumbnail"
+											className="w-20 h-12 rounded-lg object-cover border border-white/10 shrink-0"
+										/>
+										<div className="flex flex-col min-w-0">
+											<span className="text-xs text-white/60 font-mono truncate">{prompt}</span>
+											<span className="text-[11px] text-white/30 mt-0.5">Tap the video to play</span>
+										</div>
+									</div>
+								)}
 								<div className="flex items-center justify-between mt-4 px-1 text-xs text-white/50">
 									<span className="font-mono truncate">{prompt}</span>
 									<div className="ml-3 flex items-center gap-2 shrink-0">
