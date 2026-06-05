@@ -1,7 +1,5 @@
 name: Deploy API to Hostinger
 
-# Triggers on pushes to main that touch API code, or manually.
-# The API runs on Hostinger's managed Node.js (Business plan) via SSH.
 on:
   push:
     branches: [main]
@@ -39,125 +37,22 @@ jobs:
         working-directory: apps/api
         run: npm ci --omit=dev
 
-      - name: Create deployment archive
-        # Archive from inside apps/api so paths inside the tar are relative
-        # (./src, ./node_modules, etc.) — avoids the "apps/api/" prefix issue.
-        run: |
-          cd apps/api
-          tar -czf ../../api-release.tar.gz \
-            --exclude='./.env' \
-            --exclude='./.env.*' \
-            --exclude='./.git' \
-            ./src \
-            ./package.json \
-            ./package-lock.json \
-            ./node_modules
-          echo "Archive size: $(du -sh ../../api-release.tar.gz | cut -f1)"
-
-      - name: Setup SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
-          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '65002' }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
-            echo "::error::Secret HOSTINGER_SSH_PRIVATE_KEY is not set."
-            exit 1
-          fi
-          if [ -z "${SSH_HOST:-}" ]; then
-            echo "::error::Secret HOSTINGER_HOST is not set."
-            exit 1
-          fi
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          # Hostinger shared hosting blocks ssh-keyscan from GitHub runner IPs.
-          # StrictHostKeyChecking=accept-new trusts on first connect (safe for deploy).
-          cat >> ~/.ssh/config <<EOF
-          Host hostinger
-            HostName $SSH_HOST
-            Port $SSH_PORT
-            User ${{ secrets.HOSTINGER_USER }}
-            IdentityFile ~/.ssh/id_ed25519
-            StrictHostKeyChecking accept-new
-            ConnectTimeout 30
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Upload archive to Hostinger
-        env:
-          SSH_USER: ${{ secrets.HOSTINGER_USER }}
-          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
-          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '65002' }}
-          API_REMOTE_DIR: ${{ vars.HOSTINGER_API_DIR }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${API_REMOTE_DIR:-}" ]; then
-            echo "::error::Variable HOSTINGER_API_DIR is not set. Set it to the Node.js app directory on Hostinger, e.g. /home/user/api"
-            exit 1
-          fi
-
-          scp -P "${SSH_PORT}" \
-            -i ~/.ssh/id_ed25519 \
-            -o StrictHostKeyChecking=accept-new \
-            -o ConnectTimeout=30 \
-            api-release.tar.gz \
-            "${SSH_USER}@${SSH_HOST}:${API_REMOTE_DIR}/api-release.tar.gz"
-
-      - name: Extract and restart API on Hostinger
-        env:
-          SSH_USER: ${{ secrets.HOSTINGER_USER }}
-          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
-          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '65002' }}
-          API_REMOTE_DIR: ${{ vars.HOSTINGER_API_DIR }}
-        run: |
-          ssh \
-            -p "${SSH_PORT}" \
-            -i ~/.ssh/id_ed25519 \
-            -o StrictHostKeyChecking=accept-new \
-            -o ConnectTimeout=30 \
-            "${SSH_USER}@${SSH_HOST}" \
-            "bash -s" <<'ENDSSH'
-            set -euo pipefail
-
-            cd "$API_REMOTE_DIR"
-
-            # Keep a rollback copy
-            if [ -d current ]; then
-              rm -rf previous
-              mv current previous
-            fi
-
-            # Extract fresh release
-            mkdir -p staging
-            tar -xzf api-release.tar.gz -C staging
-            mv staging current
-            rm -f api-release.tar.gz
-
-            # Carry the .env forward (never tracked in git)
-            if [ -f .env ]; then
-              cp .env current/.env
-            fi
-
-            cd current
-
-            # Hostinger Node.js apps: restart via the node binary managed by hPanel.
-            # If you have PM2 installed, it will be used; otherwise print the
-            # manual restart reminder.
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 reload api --update-env 2>/dev/null || \
-              pm2 start src/main.js --name api --update-env
-              pm2 save
-              echo "API restarted via PM2"
-            else
-              echo "---"
-              echo "Deployment complete. Go to Hostinger hPanel > Node.js > Restart your app to apply the new code."
-              echo "---"
-            fi
-          ENDSSH
+      # Upload src + node_modules via FTP.
+      # Hostinger Business Node.js apps are restarted from hPanel after deploy.
+      # FTP works from GitHub runner IPs; SSH port 65002 is blocked.
+      - name: Deploy API src via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: apps/api/
+          server-dir: ${{ vars.FTP_API_REMOTE_DIR || './api/' }}
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.env
+            **/.env.*
+            **/npm-debug.log

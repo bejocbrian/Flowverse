@@ -51,63 +51,22 @@ jobs:
           VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: npm run build
 
-      - name: Setup SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
-          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '65002' }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
-            echo "::error::Secret HOSTINGER_SSH_PRIVATE_KEY is not set. Go to repo Settings > Secrets > Actions (environment: production)."
-            exit 1
-          fi
-          if [ -z "${SSH_HOST:-}" ]; then
-            echo "::error::Secret HOSTINGER_HOST is not set."
-            exit 1
-          fi
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          # Hostinger shared hosting blocks ssh-keyscan from GitHub runner IPs.
-          # We write the host key directly instead of scanning.
-          # StrictHostKeyChecking=accept-new on first connect adds it automatically.
-          cat >> ~/.ssh/config <<EOF
-          Host hostinger
-            HostName $SSH_HOST
-            Port $SSH_PORT
-            User ${{ secrets.HOSTINGER_USER }}
-            IdentityFile ~/.ssh/id_ed25519
-            StrictHostKeyChecking accept-new
-            ConnectTimeout 30
-          EOF
-          chmod 600 ~/.ssh/config
-
-      - name: Sync dist to Hostinger via rsync
-        env:
-          SSH_USER: ${{ secrets.HOSTINGER_USER }}
-          SSH_HOST: ${{ secrets.HOSTINGER_HOST }}
-          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT || '65002' }}
-          WEB_REMOTE_DIR: ${{ vars.HOSTINGER_WEB_DIR }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SSH_USER:-}" ]; then
-            echo "::error::Secret HOSTINGER_USER is not set."
-            exit 1
-          fi
-          if [ -z "${WEB_REMOTE_DIR:-}" ]; then
-            echo "::error::Variable HOSTINGER_WEB_DIR is not set. Set it to the absolute path on Hostinger, e.g. /home/user/public_html"
-            exit 1
-          fi
-
-          rsync -az --delete \
-            -e "ssh -p ${SSH_PORT} -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30" \
-            apps/web/dist/ \
-            "${SSH_USER}@${SSH_HOST}:${WEB_REMOTE_DIR}/"
-
-          echo "Web deployed to ${WEB_REMOTE_DIR} on ${SSH_HOST}"
+      # FTP upload — works on Hostinger shared/Business hosting.
+      # SSH/rsync is blocked from GitHub runner IPs; FTP is not.
+      # Uses SamKirkland/FTP-Deploy-Action which handles incremental sync
+      # (only changed files are uploaded, --delete removes stale files).
+      - name: Deploy via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: apps/web/dist/
+          server-dir: ${{ vars.FTP_REMOTE_DIR || './' }}
+          # Only upload changed files; delete files removed from dist
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
