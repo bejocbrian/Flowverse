@@ -620,6 +620,17 @@ const PRICING = [
 		features: ['125 credits', '≈ 8 videos', 'Veo 3.1 Lite (720p & 1080p)', 'No subscription'],
 	},
 	{
+		tier: 'Mini',
+		price: '99',
+		currency: '₹',
+		credits: 300,
+		videos: 20,
+		blurb: 'A bit more to play with.',
+		cta: 'Buy Mini',
+		variant: 'outline',
+		features: ['300 credits', '≈ 20 videos', 'Veo 3.1 Lite (720p & 1080p)', 'No subscription'],
+	},
+	{
 		tier: 'Creator',
 		price: '299',
 		currency: '₹',
@@ -701,7 +712,7 @@ const Pricing = () => (
 				</Link>
 			</motion.div>
 
-			<div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+			<div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5">
 				{PRICING.map((p, i) => (
 					<motion.div
 						key={p.tier}
