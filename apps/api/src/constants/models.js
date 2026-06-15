@@ -81,7 +81,11 @@ export const MODEL_VARIANTS = [
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		// imageModes: 'frame' = start/end keyframes (1 or 2 images, order matters)
+		//             'ingredient' = subject/style references (1-3 images)
+		//             'interpolation' = exactly 2 frames; API interpolates between them
+		//             (interpolation maps to mode_image='frame' with exactly 2 refs)
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		routed: true,
 		enabled: true,
@@ -97,7 +101,7 @@ export const MODEL_VARIANTS = [
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		// The ONLY model free users can generate with (both 720p & 1080p).
 		// All other models require a credit purchase.
@@ -138,7 +142,7 @@ export const MODEL_VARIANTS = [
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		routed: true,
 		enabled: true,

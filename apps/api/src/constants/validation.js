@@ -28,7 +28,7 @@ export const VALIDATION = {
   OUTPUT_TYPES: ['video', 'image'],
   
   // Image modes for reference images
-  IMAGE_MODES: ['frame', 'ingredient', 'reference'],
+  IMAGE_MODES: ['frame', 'ingredient', 'reference', 'interpolation'],
   
   // Reference images
   MAX_REF_IMAGES_TOTAL: 10,

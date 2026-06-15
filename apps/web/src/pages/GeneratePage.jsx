@@ -142,6 +142,7 @@ const SettingsPanel = ({
 	// reference images
 	supportsFrames,
 	supportsIngredients,
+	supportsInterpolation,
 	activeMode,
 	onToggleMode,
 	creditCost,
@@ -296,12 +297,25 @@ const SettingsPanel = ({
 								Ingredients
 							</button>
 						)}
+						{supportsInterpolation && (
+							<button
+								onClick={() => onToggleMode(activeMode === 'interpolation' ? null : 'interpolation')}
+								className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors ${
+									activeMode === 'interpolation' ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+								}`}
+							>
+								<ArrowLeftRight className="w-3.5 h-3.5" />
+								Interpolate
+							</button>
+						)}
 					</div>
 					<p className="text-[11px] text-white/40">
 						{activeMode === 'frame'
 							? 'Start/End frame slots appear in the prompt bar below.'
 							: activeMode === 'ingredient'
 							? 'Use the + in the prompt bar to add reference images.'
+							: activeMode === 'interpolation'
+							? 'Upload a first and last frame — the AI generates the motion between them.'
 							: 'Select a mode to add reference images.'}
 					</p>
 				</div>
@@ -517,6 +531,7 @@ const GeneratePage = () => {
 		? 'reference'
 		: null;
 	const supportsIngredients = Boolean(ingredientMode);
+	const supportsInterpolation = imageModes.includes('interpolation');
 	const maxIngredients = Math.min(selectedModel?.maxRefImages ?? 3, 3);
 
 	const clearRefImages = useCallback(() => {
@@ -532,7 +547,7 @@ const GeneratePage = () => {
 			return;
 		}
 		// Switching modes: clear the other mode's images (mutual exclusivity).
-		if (mode === 'frame') {
+		if (mode === 'frame' || mode === 'interpolation') {
 			setIngredients([]);
 		} else if (mode === 'ingredient') {
 			setFrameFirst(null);
@@ -569,6 +584,7 @@ const GeneratePage = () => {
 		// Reset activeMode if the model doesn't support it.
 		if (activeMode === 'frame' && !modes.includes('frame')) setActiveMode(null);
 		if (activeMode === 'ingredient' && !modes.includes('ingredient') && !modes.includes('reference')) setActiveMode(null);
+		if (activeMode === 'interpolation' && !modes.includes('interpolation')) setActiveMode(null);
 	}, [selectedModel, resolution, duration, aspectRatio, frameFirst, frameLast, ingredients.length, activeMode]);
 
 	const creditCost = useMemo(() => {
@@ -584,7 +600,9 @@ const GeneratePage = () => {
 	const balance = currentUser?.credits_balance ?? 0;
 	const insufficient = balance < creditCost;
 	const promptOk = prompt.trim().length >= 3;
-	const canSubmit = !loading && promptOk && !insufficient && Boolean(selectedModel);
+	// Interpolation mode requires both first and last frames before submitting
+	const interpolationReady = activeMode !== 'interpolation' || (Boolean(frameFirst) && Boolean(frameLast));
+	const canSubmit = !loading && promptOk && !insufficient && Boolean(selectedModel) && interpolationReady;
 
 	const refCount = (frameFirst ? 1 : 0) + (frameLast ? 1 : 0) + ingredients.length;
 
@@ -683,6 +701,17 @@ const GeneratePage = () => {
 	// Resolve the active reference-image payload from the mutually-exclusive
 	// Frames / Ingredients state.
 	const buildImagePayload = useCallback(() => {
+		if (activeMode === 'interpolation') {
+			// Interpolation: requires exactly 2 frames (first + last).
+			// Don't send payload unless both are set.
+			if (frameFirst && frameLast) {
+				return {
+					image_mode: 'interpolation',
+					ref_images: [frameFirst.dataUrl, frameLast.dataUrl],
+				};
+			}
+			return null;
+		}
 		if (frameFirst || frameLast) {
 			// Order matters for frames: [first, last].
 			const imgs = [frameFirst, frameLast].filter(Boolean).map((i) => i.dataUrl);
@@ -692,7 +721,7 @@ const GeneratePage = () => {
 			return { image_mode: ingredientMode, ref_images: ingredients.map((i) => i.dataUrl) };
 		}
 		return null;
-	}, [frameFirst, frameLast, ingredients, ingredientMode]);
+	}, [activeMode, frameFirst, frameLast, ingredients, ingredientMode]);
 
 	const handleSubmit = useCallback(async () => {
 		if (!canSubmit || !selectedModel) return;
@@ -1330,6 +1359,7 @@ const GeneratePage = () => {
 									onSelectDuration={setDuration}
 									supportsFrames={supportsFrames}
 									supportsIngredients={supportsIngredients}
+									supportsInterpolation={supportsInterpolation}
 									activeMode={activeMode}
 									onToggleMode={handleToggleMode}
 									creditCost={creditCost}
@@ -1345,6 +1375,18 @@ const GeneratePage = () => {
 									<FrameChip label="Start" image={frameFirst} onPick={(f) => handlePickFrame('first', f)} onClear={() => handleClearFrame('first')} />
 									<ArrowLeftRight className="w-3.5 h-3.5 text-white/25" />
 									<FrameChip label="End" image={frameLast} onPick={(f) => handlePickFrame('last', f)} onClear={() => handleClearFrame('last')} />
+								</div>
+							)}
+
+							{/* Interpolation chips (left of input, when Interpolation mode active) */}
+							{activeMode === 'interpolation' && (
+								<div className="flex items-center gap-1.5 shrink-0">
+									<FrameChip label="First" image={frameFirst} onPick={(f) => handlePickFrame('first', f)} onClear={() => handleClearFrame('first')} />
+									<div className="flex flex-col items-center gap-0.5">
+										<ArrowLeftRight className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]/60" />
+										<span className="text-[8px] font-mono text-white/30 uppercase tracking-wider">interp.</span>
+									</div>
+									<FrameChip label="Last" image={frameLast} onPick={(f) => handlePickFrame('last', f)} onClear={() => handleClearFrame('last')} />
 								</div>
 							)}
 
@@ -1465,6 +1507,8 @@ const GeneratePage = () => {
 							<span>
 								{!promptOk
 									? 'Type at least a few words to start.'
+									: activeMode === 'interpolation' && (!frameFirst || !frameLast)
+									? 'Add both a first and last frame to use interpolation.'
 									: insufficient
 									? 'Not enough credits for these settings.'
 									: 'Press Enter or click the arrow to generate.'}

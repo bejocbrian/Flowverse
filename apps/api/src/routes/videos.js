@@ -214,11 +214,18 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 		}
 		resolvedImageMode = sanitizedImageMode || supportedModes[0];
 
-		// 'frame' allows at most 2 (start/end); everything else up to maxRefImages.
-		const maxForMode = resolvedImageMode === 'frame' ? 2 : (variant.maxRefImages || 1);
+		// 'frame' allows at most 2 (start/end); 'interpolation' requires EXACTLY 2;
+		// everything else up to maxRefImages.
+		const maxForMode = (resolvedImageMode === 'frame' || resolvedImageMode === 'interpolation') ? 2 : (variant.maxRefImages || 1);
 		if (ref_images.length > maxForMode) {
 			return res.status(400).json({
 				error: `Too many images for ${resolvedImageMode} mode (max ${maxForMode})`,
+			});
+		}
+		// Interpolation requires exactly 2 frames (first and last).
+		if (resolvedImageMode === 'interpolation' && ref_images.length !== 2) {
+			return res.status(400).json({
+				error: 'Interpolation mode requires exactly 2 images (first frame and last frame)',
 			});
 		}
 

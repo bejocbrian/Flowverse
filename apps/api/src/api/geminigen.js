@@ -184,9 +184,14 @@ export async function generateVideo({
 		form.append('aspect_ratio', aspect_ratio);
 		if (refs.length > 0) {
 			// Veo: ref_images accepts public URLs. mode_image selects how they
-			// are used: 'frame' (start/end keyframes, max 2) or 'ingredient'
-			// (subject/style references, max 3). Order matters for 'frame'.
-			form.append('mode_image', mode_image === 'ingredient' ? 'ingredient' : 'frame');
+			// are used:
+			//   'frame'         — start/end keyframes (1-2 images, order matters)
+			//   'ingredient'    — subject/style references (1-3 images)
+			//   'interpolation' — exactly 2 frames; vendor interpolates motion
+			//                     between them (maps to mode_image='frame' on the
+			//                     API; the distinction is purely for our UX layer)
+			const apiMode = mode_image === 'ingredient' ? 'ingredient' : 'frame';
+			form.append('mode_image', apiMode);
 			for (const url of refs) {
 				form.append('ref_images', url);
 			}
