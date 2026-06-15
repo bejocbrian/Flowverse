@@ -6,6 +6,7 @@ import { AuthProvider } from '@/contexts/AuthContext.jsx';
 import ProtectedRoute from '@/components/ProtectedRoute.jsx';
 import MainLayout from '@/components/MainLayout.jsx';
 import AdminLayout from '@/components/AdminLayout.jsx';
+import ErrorBoundary from '@/components/ErrorBoundary.jsx';
 
 import HomePage from '@/pages/HomePage.jsx';
 import DashboardPage from '@/pages/DashboardPage.jsx';
@@ -56,9 +57,11 @@ function App() {
             path="/app/dashboard"
             element={
               <ProtectedRoute requiredRole="consumer">
-                <MainLayout>
-                  <DashboardPage />
-                </MainLayout>
+                <ErrorBoundary title="Dashboard Error" message="Something went wrong loading your dashboard. Please try again.">
+                  <MainLayout>
+                    <DashboardPage />
+                  </MainLayout>
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -66,9 +69,11 @@ function App() {
             path="/app/generate"
             element={
               <ProtectedRoute requiredRole="consumer">
-                <MainLayout>
-                  <GeneratePage />
-                </MainLayout>
+                <ErrorBoundary title="Generation Error" message="Something went wrong on the generation page. Please try again.">
+                  <MainLayout>
+                    <GeneratePage />
+                  </MainLayout>
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -76,9 +81,11 @@ function App() {
             path="/app/library"
             element={
               <ProtectedRoute requiredRole="consumer">
-                <MainLayout>
-                  <LibraryPage />
-                </MainLayout>
+                <ErrorBoundary title="Library Error" message="Something went wrong loading your library. Please try again.">
+                  <MainLayout>
+                    <LibraryPage />
+                  </MainLayout>
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -86,9 +93,11 @@ function App() {
             path="/app/library/:id"
             element={
               <ProtectedRoute requiredRole="consumer">
-                <MainLayout>
-                  <VideoDetailPage />
-                </MainLayout>
+                <ErrorBoundary title="Video Error" message="Something went wrong loading this video. Please try again.">
+                  <MainLayout>
+                    <VideoDetailPage />
+                  </MainLayout>
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />

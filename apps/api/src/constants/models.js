@@ -76,7 +76,8 @@ export const MODEL_VARIANTS = [
 		billing: 'per_video',
 		// Both resolutions on ONE picker entry so users can choose quality.
 		// Same price either way (matches vendor pass-through).
-		credits: { '720p': 15, '1080p': 15 },
+		// 4K is 2x the cost of 1080p
+		credits: { '720p': 15, '1080p': 15, '4k': 30 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
@@ -92,7 +93,7 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 15, '1080p': 15 },
+		credits: { '720p': 15, '1080p': 15, '4k': 30 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
@@ -132,7 +133,8 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 500, '1080p': 500 },
+		// 4K is 2x the cost of 1080p
+		credits: { '720p': 500, '1080p': 500, '4k': 1000 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],

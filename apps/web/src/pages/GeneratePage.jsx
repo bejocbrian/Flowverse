@@ -19,11 +19,13 @@ import {
 	Trash2,
 	Wand2,
 	X,
+	ListVideo,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import VideoPlayer from '@/components/VideoPlayer.jsx';
-import apiServerClient from '@/lib/apiServerClient.js';
+import PreviewConfirmDialog from '@/components/PreviewConfirmDialog.jsx';
+import apiServerClient, { createBatch, createPreview, confirmPreview, cancelPreview, getPreview } from '@/lib/apiServerClient.js';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover.jsx';
 
 const ASPECT_RATIOS = [
@@ -245,7 +247,7 @@ const SettingsPanel = ({
 					<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Quality</label>
 					<div className="flex bg-black/40 p-1 rounded-xl">
 						{resolutions.map((r) => {
-							const tag = r === '1080p' ? 'Full HD' : r === '720p' ? 'HD' : r === '480p' ? 'SD' : '';
+							const tag = r === '1080p' ? 'Full HD' : r === '720p' ? 'HD' : r === '480p' ? 'SD' : r === '4k' ? 'UHD' : '';
 							return (
 								<button
 									key={r}
@@ -445,6 +447,16 @@ const GeneratePage = () => {
 	const [lastVideoId, setLastVideoId] = useState(null);
 	const [extendOpen, setExtendOpen] = useState(false);
 	const [extendPrompt, setExtendPrompt] = useState('');
+
+	// ── Batch mode state ──
+	const [batchMode, setBatchMode] = useState(false);
+	const [batchPrompts, setBatchPrompts] = useState(['']);
+	const [batchLoading, setBatchLoading] = useState(false);
+	const [batchResult, setBatchResult] = useState(null); // { batchId, videos: [] }
+
+	// ── Preview before charge state ──
+	const [previewOpen, setPreviewOpen] = useState(false);
+	const [previewData, setPreviewData] = useState(null); // { id, url, credits, fullCredits, prompt }
 
 	const pollingRef = useRef(null);
 	const progressRef = useRef(null);
@@ -767,6 +779,137 @@ const GeneratePage = () => {
 		setPrompt(text);
 	};
 
+	/* ---------------------------- batch ---------------------------------- */
+
+	const handleAddBatchPrompt = useCallback(() => {
+		if (batchPrompts.length >= 5) return;
+		setBatchPrompts((prev) => [...prev, '']);
+	}, [batchPrompts.length]);
+
+	const handleRemoveBatchPrompt = useCallback((index) => {
+		setBatchPrompts((prev) => prev.filter((_, i) => i !== index));
+	}, []);
+
+	const handleBatchPromptChange = useCallback((index, value) => {
+		setBatchPrompts((prev) => prev.map((p, i) => (i === index ? value : p)));
+	}, []);
+
+	const handleBatchSubmit = useCallback(async () => {
+		const validPrompts = batchPrompts.filter((p) => p.trim().length >= 3);
+		if (validPrompts.length === 0) {
+			toast.error('Add at least one prompt to generate');
+			return;
+		}
+		if (!selectedModel) return;
+
+		setBatchLoading(true);
+		try {
+			const result = await createBatch(
+				validPrompts.map((p) => ({ prompt: p.trim() })),
+				{
+					aspect_ratio: aspectRatio,
+					duration,
+					quality: resolution,
+					model_key: selectedModel.key,
+					output_type: 'video',
+				}
+			);
+			setBatchResult(result);
+			setBatchPrompts(['']);
+			refreshUser();
+			toast.success(`Batch started — ${result.videos?.length} videos queued`);
+		} catch (error) {
+			toast.error(error.message || 'Batch generation failed');
+		} finally {
+			setBatchLoading(false);
+		}
+	}, [batchPrompts, selectedModel, aspectRatio, duration, resolution, refreshUser]);
+
+	const handleCloseBatch = useCallback(() => {
+		setBatchMode(false);
+		setBatchResult(null);
+		setBatchPrompts(['']);
+	}, []);
+
+	/* ---------------------------- preview -------------------------------- */
+
+	const pollPreviewStatus = useCallback(async (previewId) => {
+		const maxAttempts = 30;
+		let attempts = 0;
+		const interval = setInterval(async () => {
+			attempts++;
+			try {
+				const data = await getPreview(previewId);
+				if (data.status === 'completed' && data.video_url) {
+					clearInterval(interval);
+					setPreviewData((prev) => prev ? { ...prev, url: data.video_url } : null);
+				} else if (data.status === 'failed' || attempts >= maxAttempts) {
+					clearInterval(interval);
+					toast.error('Preview generation failed');
+					setPreviewOpen(false);
+					setPreviewData(null);
+				}
+			} catch {
+				// ignore transient errors
+			}
+		}, 5000);
+		return () => clearInterval(interval);
+	}, []);
+
+	const handlePreviewGenerate = useCallback(async () => {
+		if (!canSubmit || !selectedModel) return;
+		setLoading(true);
+		try {
+			const result = await createPreview({
+				prompt: prompt.trim(),
+				aspect_ratio: aspectRatio,
+				model_key: selectedModel.key,
+			});
+			const fullCost = selectedModel.credits?.[resolution] ?? creditCost;
+			setPreviewData({
+				id: result.preview.id,
+				url: null,
+				previewCredits: result.preview.credit_cost,
+				fullCredits: fullCost,
+				prompt: prompt.trim(),
+				quality: resolution,
+				duration,
+			});
+			setPreviewOpen(true);
+			pollPreviewStatus(result.preview.id);
+		} catch (error) {
+			toast.error(error.message || 'Failed to start preview');
+		} finally {
+			setLoading(false);
+		}
+	}, [canSubmit, selectedModel, prompt, aspectRatio, resolution, creditCost, duration, pollPreviewStatus]);
+
+	const handlePreviewConfirm = useCallback(async () => {
+		if (!previewData) return;
+		const data = await confirmPreview(previewData.id, {
+			quality: previewData.quality,
+			duration: previewData.duration,
+		});
+		const videoId = data.video?.id;
+		setPreviewOpen(false);
+		setPreviewData(null);
+		setStage(1);
+		setLoading(true);
+		progressRef.current = setInterval(() => {
+			setProgress((p) => (p >= 90 ? 90 : p + 1));
+		}, 1000);
+		if (videoId) startPolling(videoId);
+		refreshUser();
+	}, [previewData, startPolling, refreshUser]);
+
+	const handlePreviewCancel = useCallback(async () => {
+		if (!previewData) return;
+		await cancelPreview(previewData.id);
+		setPreviewOpen(false);
+		setPreviewData(null);
+		refreshUser();
+	}, [previewData, refreshUser]);
+
 	/* ---------------------------- extend --------------------------------- */
 
 	const handleExtend = useCallback(async () => {
@@ -829,7 +972,7 @@ const GeneratePage = () => {
 				<div className="flex-1 overflow-y-auto px-4 sm:px-8 pt-6 pb-44">
 					<div className="mx-auto w-full max-w-5xl flex flex-col items-center">
 						{/* Empty state */}
-						{!loading && !generatedResult && (
+						{!loading && !generatedResult && !batchMode && (
 							<motion.div
 								initial={{ opacity: 0, y: 12 }}
 								animate={{ opacity: 1, y: 0 }}
@@ -861,6 +1004,120 @@ const GeneratePage = () => {
 										</button>
 									))}
 								</div>
+
+								{/* Batch mode toggle */}
+								<button
+									type="button"
+									onClick={() => setBatchMode(true)}
+									className="mt-8 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 text-white/50 hover:text-white hover:border-white/20 text-sm transition-colors"
+								>
+									<ListVideo className="w-4 h-4" />
+									Batch generate (up to 5 videos)
+								</button>
+							</motion.div>
+						)}
+
+						{/* Batch mode UI */}
+						{!loading && !generatedResult && batchMode && (
+							<motion.div
+								initial={{ opacity: 0, y: 12 }}
+								animate={{ opacity: 1, y: 0 }}
+								transition={{ duration: 0.3 }}
+								className="w-full max-w-2xl mt-8 sm:mt-16"
+							>
+								<div className="flex items-center justify-between mb-4">
+									<div className="flex items-center gap-2">
+										<ListVideo className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
+										<h2 className="text-lg font-semibold">Batch Generation</h2>
+										<span className="text-xs text-white/40 font-mono ml-1">up to 5 videos</span>
+									</div>
+									<button
+										onClick={handleCloseBatch}
+										className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+									>
+										<X className="w-4 h-4" />
+									</button>
+								</div>
+
+								<div className="flex flex-col gap-3 mb-4">
+									{batchPrompts.map((p, i) => (
+										<div key={i} className="flex items-center gap-2">
+											<span className="text-xs font-mono text-white/30 w-4 shrink-0">{i + 1}</span>
+											<input
+												type="text"
+												value={p}
+												onChange={(e) => handleBatchPromptChange(i, e.target.value)}
+												placeholder={`Prompt ${i + 1}…`}
+												className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30 transition-colors"
+											/>
+											{batchPrompts.length > 1 && (
+												<button
+													onClick={() => handleRemoveBatchPrompt(i)}
+													className="p-2 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+												>
+													<X className="w-4 h-4" />
+												</button>
+											)}
+										</div>
+									))}
+								</div>
+
+								{batchPrompts.length < 5 && (
+									<button
+										onClick={handleAddBatchPrompt}
+										className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-white/10 text-white/40 hover:text-white hover:border-white/20 text-sm transition-colors mb-4"
+									>
+										<Plus className="w-4 h-4" />
+										Add another prompt
+									</button>
+								)}
+
+								<div className="flex items-center justify-between">
+									<div className="text-xs text-white/40">
+										{batchPrompts.filter((p) => p.trim().length >= 3).length} valid prompt(s) ·{' '}
+										<span className="font-mono">
+											{batchPrompts.filter((p) => p.trim().length >= 3).length * creditCost} credits total
+										</span>
+									</div>
+									<button
+										onClick={handleBatchSubmit}
+										disabled={batchLoading || batchPrompts.filter((p) => p.trim().length >= 3).length === 0 || insufficient}
+										className="flex items-center gap-2 px-5 py-2 rounded-xl bg-white text-black text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+									>
+										{batchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+										Generate Batch
+									</button>
+								</div>
+
+								{/* Batch result */}
+								{batchResult && (
+									<motion.div
+										initial={{ opacity: 0, y: 8 }}
+										animate={{ opacity: 1, y: 0 }}
+										className="mt-6 bg-white/[0.04] border border-white/10 rounded-xl p-4"
+									>
+										<div className="flex items-center gap-2 mb-3">
+											<Check className="w-4 h-4 text-emerald-400" />
+											<span className="text-sm font-medium">Batch submitted</span>
+											<span className="text-xs text-white/40 font-mono">ID: {batchResult.batch?.id?.slice(0, 8)}</span>
+										</div>
+										<div className="flex flex-col gap-2">
+											{(batchResult.videos || []).map((v, i) => (
+												<div key={v.id} className="flex items-center justify-between text-xs">
+													<span className="text-white/60 truncate max-w-[240px]">
+														{i + 1}. {v.prompt?.slice(0, 50)}
+													</span>
+													<span className="font-mono text-white/40 ml-2 shrink-0">
+														{v.status === 'queued' ? '⏳ queued' : v.status === 'completed' ? '✅ done' : v.status}
+													</span>
+												</div>
+											))}
+										</div>
+										<p className="text-xs text-white/30 mt-3">
+											Check your Library for results as they complete.
+										</p>
+									</motion.div>
+								)}
 							</motion.div>
 						)}
 
@@ -1212,11 +1469,43 @@ const GeneratePage = () => {
 									? 'Not enough credits for these settings.'
 									: 'Press Enter or click the arrow to generate.'}
 							</span>
-							<span className="hidden sm:inline">{balance} credits available</span>
+							<div className="hidden sm:flex items-center gap-3">
+								{/* Preview before charge button */}
+								{promptOk && !insufficient && (
+									<button
+										type="button"
+										onClick={handlePreviewGenerate}
+										disabled={loading}
+										className="flex items-center gap-1 text-white/40 hover:text-white/70 transition-colors"
+										title="Generate a 2-second low-res preview before spending full credits"
+									>
+										<Sparkles className="w-3 h-3" />
+										Preview first
+									</button>
+								)}
+								<span>{balance} credits available</span>
+							</div>
 						</div>
 					</div>
 				</div>
 			</div>
+
+			{/* Preview confirm dialog */}
+			{previewOpen && previewData && (
+				<PreviewConfirmDialog
+					previewId={previewData.id}
+					previewUrl={previewData.url}
+					previewCredits={previewData.previewCredits}
+					fullCredits={previewData.fullCredits}
+					prompt={previewData.prompt}
+					onConfirm={handlePreviewConfirm}
+					onCancel={handlePreviewCancel}
+					onClose={() => {
+						setPreviewOpen(false);
+						setPreviewData(null);
+					}}
+				/>
+			)}
 		</>
 	);
 };

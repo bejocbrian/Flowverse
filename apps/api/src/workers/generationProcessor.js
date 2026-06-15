@@ -12,9 +12,33 @@ import { refundCredits } from '../utils/dbTransaction.js';
  * Designed for shared hosting environments without Redis.
  */
 
-// Configuration
-const MAX_POLL_ATTEMPTS = 60;
-const POLL_INTERVAL_MS = 10_000; // 10 seconds
+// Configuration - all configurable via environment variables
+const MAX_POLL_ATTEMPTS = parseInt(process.env.MAX_POLL_ATTEMPTS || '60', 10);
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '10000', 10); // 10 seconds default
+
+/**
+ * Read integer from environment with fallback
+ * @param {string} envName - Environment variable name
+ * @param {number} fallback - Default value
+ * @returns {number} Parsed integer value
+ */
+function readInt(envName, fallback) {
+  const raw = process.env[envName];
+  if (!raw) return fallback;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Override with more specific environment variable support
+const CUSTOM_MAX_POLL = readInt('GENERATION_MAX_POLL_ATTEMPTS', MAX_POLL_ATTEMPTS);
+const CUSTOM_POLL_INTERVAL = readInt('GENERATION_POLL_INTERVAL_MS', POLL_INTERVAL_MS);
+
+// Export for use in testing and monitoring
+export const POLLING_CONFIG = {
+  maxAttempts: CUSTOM_MAX_POLL,
+  intervalMs: CUSTOM_POLL_INTERVAL,
+  maxWaitTimeMs: CUSTOM_MAX_POLL * CUSTOM_POLL_INTERVAL,
+};
 
 /**
  * Process video generation
@@ -113,8 +137,8 @@ export async function processGeneration(videoRecord, isImage) {
  * Poll GeminiGen for completion (fallback mode)
  */
 async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
-	for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
-		await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+	for (let attempt = 1; attempt <= POLLING_CONFIG.maxAttempts; attempt++) {
+		await new Promise(resolve => setTimeout(resolve, POLLING_CONFIG.intervalMs));
 
 		try {
 			const status = await getGenerationStatus(externalUuid);
@@ -166,7 +190,7 @@ async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
 	}
 
 	// Timeout
-	logger.error(`Polling timed out for ${videoRecord.id} after ${MAX_POLL_ATTEMPTS} attempts`);
+	logger.error(`Polling timed out for ${videoRecord.id} after ${POLLING_CONFIG.maxAttempts} attempts (max wait: ${POLLING_CONFIG.maxWaitTimeMs}ms)`);
 	await pb.collection('videos').update(videoRecord.id, {
 		status: 'failed',
 		error_message: 'Generation timed out — please try again',
