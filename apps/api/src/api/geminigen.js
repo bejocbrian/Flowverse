@@ -233,16 +233,18 @@ export async function generateVideo({
 }
 
 /**
- * Extend an existing GeminiGen Veo video by its generation UUID.
- * POST /video-extend/veo with { prompt, ref_history }.
+ * Extend an existing GeminiGen video by its generation UUID.
+ * Veo: POST /video-extend/veo with { prompt, ref_history }
+ * Grok: POST /video-extend/grok with { prompt, ref_history }
  * Model/aspect/resolution are inherited from the source video by the vendor.
  *
  * @param {Object} params
  * @param {string} params.prompt - What should happen in the continuation.
  * @param {string} params.ref_history - UUID of a video previously generated on GeminiGen.
+ * @param {string} [params.model] - Source video model id, used to pick the correct endpoint.
  * @returns {Promise<{uuid: string, status: number}>}
  */
-export async function extendVideo({ prompt, ref_history }) {
+export async function extendVideo({ prompt, ref_history, model }) {
 	if (!ref_history) {
 		throw new Error('extendVideo requires ref_history (source video UUID)');
 	}
@@ -251,8 +253,10 @@ export async function extendVideo({ prompt, ref_history }) {
 	form.append('prompt', prompt);
 	form.append('ref_history', ref_history);
 
-	const endpoint = `${API_BASE_URL()}/video-extend/veo`;
-	logger.info(`GeminiGen extend request: POST ${endpoint} ref_history=${ref_history}`);
+	// Route to the correct endpoint based on the source model's provider.
+	const provider = MODEL_PROVIDER_MAP[model] || 'veo';
+	const endpoint = `${API_BASE_URL()}/video-extend/${provider}`;
+	logger.info(`GeminiGen extend request: POST ${endpoint} model=${model || 'unknown'} ref_history=${ref_history}`);
 
 	const response = await fetchWithRetry(endpoint, {
 		method: 'POST',

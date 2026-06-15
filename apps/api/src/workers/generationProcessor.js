@@ -111,11 +111,25 @@ export async function processGeneration(videoRecord, isImage) {
 	} catch (error) {
 		logger.error(`GeminiGen submission error for ${videoRecord.id}:`, error.message);
 
+		// Translate known GeminiGen API error codes into user-friendly messages.
+		const rawMessage = error.message || '';
+		let userMessage = `Submission failed: ${rawMessage}`;
+
+		if (rawMessage.includes('INVALID_VIDEO_LENGTH')) {
+			userMessage = 'This video duration is not supported by the provider right now. Please try 6s or 10s.';
+		} else if (rawMessage.includes('API_KEY_NOT_FOUND') || rawMessage.includes('401')) {
+			userMessage = 'Generation service authentication failed. Please contact support.';
+		} else if (rawMessage.includes('INSUFFICIENT_CREDITS')) {
+			userMessage = 'Provider credits exhausted. Please contact support.';
+		} else if (rawMessage.includes('CONTENT_POLICY')) {
+			userMessage = 'Your prompt was rejected by the content policy. Please revise it and try again.';
+		}
+
 		// Mark as failed
 		try {
 			await pb.collection('videos').update(videoRecord.id, {
 				status: 'failed',
-				error_message: `Submission failed: ${error.message}`,
+				error_message: userMessage,
 			});
 		} catch (updateErr) {
 			logger.error('Failed to mark video as failed:', updateErr.message);

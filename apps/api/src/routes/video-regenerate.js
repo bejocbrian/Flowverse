@@ -310,7 +310,7 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		});
 
 		// Fire-and-forget submission to the extend endpoint.
-		submitExtend(newVideo, source.external_id).catch((error) => {
+		submitExtend(newVideo, source.external_id, source.model).catch((error) => {
 			logger.error(`Extend submission failed for ${newVideo.id}:`, error.message);
 		});
 
@@ -329,10 +329,10 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
  * Submit an extend request to GeminiGen (async, fire-and-forget). Mirrors
  * submitToGeminiGen's failure/refund handling.
  */
-async function submitExtend(videoRecord, sourceUuid) {
+async function submitExtend(videoRecord, sourceUuid, sourceModel) {
 	try {
 		await pb.collection('videos').update(videoRecord.id, { status: 'processing' });
-		const result = await extendVideo({ prompt: videoRecord.prompt, ref_history: sourceUuid });
+		const result = await extendVideo({ prompt: videoRecord.prompt, ref_history: sourceUuid, model: sourceModel });
 		await pb.collection('videos').update(videoRecord.id, { external_id: result.uuid });
 		logger.info(`Extend submitted: video=${videoRecord.id}, external_id=${result.uuid}`);
 	} catch (error) {

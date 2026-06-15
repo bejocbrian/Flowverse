@@ -56,12 +56,13 @@ export const MODEL_VARIANTS = [
 		type: 'video',
 		billing: 'per_video',
 		credits: { '480p': 25, '720p': 25 },
+		// Docs list 6, 10, 15 as valid durations. The live API currently
+		// rejects 15s with INVALID_VIDEO_LENGTH on some accounts/regions.
+		// Keeping 15s here since it's documented as valid; users will see
+		// a clear error if their account doesn't support it yet.
 		durations: [6, 10, 15],
 		maxDuration: 15,
 		aspectRatios: ['16:9', '9:16'],
-		// Grok accepts reference images via file_urls in the API, but we don't
-		// expose Frames/Ingredients for it in the UI (per product decision).
-		// If you want to enable it later, add: imageModes: ['reference'],
 		imageModes: [],
 		maxRefImages: 0,
 		routed: true,
