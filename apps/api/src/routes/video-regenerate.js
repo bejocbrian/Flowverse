@@ -14,10 +14,11 @@ const router = Router();
 
 router.use(pocketbaseAuth);
 
-// POST /videos/:id/regenerate - Regenerate video with variations
+// POST /videos/:id/regenerate - Regenerate video with a refined prompt or variations
 router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => {
 	const { id } = req.params;
 	const {
+		prompt: newPrompt,          // optional: override the original prompt
 		sameSettings = true,
 		varyAspectRatio,
 		varyDuration,
@@ -129,7 +130,10 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 			// Create new video generation request
 			const newVideo = await pb.collection('videos').create({
 				user_id: req.pocketbaseUserId,
-				prompt: video.prompt,
+				// Use the caller's refined prompt if provided, else reuse the original.
+				prompt: (newPrompt && typeof newPrompt === 'string' && newPrompt.trim().length >= 3)
+					? newPrompt.trim()
+					: video.prompt,
 				negative_prompt: video.negative_prompt,
 				status: 'queued',
 				aspect_ratio: aspectRatio,

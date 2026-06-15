@@ -410,6 +410,7 @@ const VideoDetailPage = () => {
 				isOpen={regenOpen}
 				onClose={() => setRegenOpen(false)}
 				defaultSettings={video}
+				originalPrompt={video?.prompt}
 			/>
 		</>
 	);

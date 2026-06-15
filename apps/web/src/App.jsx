@@ -23,6 +23,7 @@ import WalletSuccessPage from '@/pages/WalletSuccessPage.jsx';
 import WalletCancelPage from '@/pages/WalletCancelPage.jsx';
 import PublicVideoPage from '@/pages/PublicVideoPage.jsx';
 import AnalyticsPage from '@/pages/AnalyticsPage.jsx';
+import QueuePage from '@/pages/QueuePage.jsx';
 
 // Admin Pages
 import AdminDashboard from '@/pages/AdminDashboard.jsx';
@@ -138,6 +139,18 @@ function App() {
                 <MainLayout>
                   <AnalyticsPage />
                 </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/queue"
+            element={
+              <ProtectedRoute requiredRole="consumer">
+                <ErrorBoundary title="Queue Error" message="Something went wrong loading the queue. Please try again.">
+                  <MainLayout>
+                    <QueuePage />
+                  </MainLayout>
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
