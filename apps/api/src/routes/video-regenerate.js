@@ -1,14 +1,18 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
-import { generateVideo, generateImage, extendVideo } from '../api/geminigen.js';
+import { generateVideo, generateImage, extendVideo, getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
 import { getEnabledModels } from '../constants/models.js';
 import { isPaidUser } from '../utils/userTier.js';
+import { refundCredits } from '../utils/dbTransaction.js';
+import { createTempDir, cleanupTempDir, downloadAndMerge } from '../utils/videoMerger.js';
+import { POLLING_CONFIG } from '../workers/generationProcessor.js';
 
 const router = Router();
 
@@ -190,12 +194,21 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 });
 
 /**
- * POST /videos/:id/extend - Extend a completed Veo video with a follow-up clip.
+ * POST /videos/:id/extend - Extend a completed video with a follow-up clip.
  *
- * Uses GeminiGen's /video-extend/veo, which takes the SOURCE video's generation
- * UUID (our `external_id`) as `ref_history`. Model/aspect/resolution are
- * inherited by the vendor, so we charge the same credits as a fresh generation
- * of the source video's model/resolution.
+ * Uses GeminiGen's /video-extend/{provider} endpoint. After the new clip is
+ * ready, it is concatenated with all previous clips (tracked in clip_urls)
+ * via FFmpeg to produce a single merged video file. The merged file is stored
+ * back to PocketBase and becomes the new video_url — so the user always sees
+ * one growing video, not a collection of separate clips.
+ *
+ * The chain:
+ *   original (clip_urls: [url1])
+ *     → extend 1 (clip_urls: [url1, url2], video_url: merged_1+2)
+ *     → extend 2 (clip_urls: [url1, url2, url3], video_url: merged_1+2+3)
+ *     → ...up to ~15 clips (8s each ≈ 2 minutes total)
+ *
+ * external_id always tracks the LATEST GeminiGen clip UUID for the next call.
  */
 router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 	const { id } = req.params;
@@ -243,13 +256,27 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		if (source.status !== 'completed') {
 			return res.status(400).json({ error: 'Only completed videos can be extended' });
 		}
-		// Extend needs the GeminiGen source UUID. external_id is hidden but the
-		// superuser API client reads it.
 		if (!source.external_id) {
-			return res.status(400).json({ error: 'This video cannot be extended' });
+			return res.status(400).json({ error: 'This video cannot be extended (no external ID)' });
 		}
 
-		// Price the extend like a fresh generation of the source's model/resolution.
+		// Resolve all existing clip URLs from the source video.
+		// clip_urls is a JSON array stored on the video record.
+		// For a brand-new (non-extended) video, clip_urls is empty so we seed it
+		// from video_url. For already-extended videos, clip_urls holds every clip
+		// including the original.
+		let existingClipUrls = [];
+		if (source.clip_urls) {
+			try {
+				const parsed = JSON.parse(source.clip_urls);
+				if (Array.isArray(parsed) && parsed.length > 0) existingClipUrls = parsed;
+			} catch { /* ignore */ }
+		}
+		if (existingClipUrls.length === 0 && source.video_url) {
+			existingClipUrls = [source.video_url];
+		}
+
+		// Price the extend the same as a fresh generation of the source model.
 		const enabled = getEnabledModels();
 		const variant =
 			enabled.find((m) => m.id === source.model && (m.credits?.[source.quality] != null || m.creditsPerSecond?.[source.quality] != null)) ||
@@ -258,7 +285,6 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		if (!variant) {
 			return res.status(400).json({ error: 'Source model is no longer available for extend' });
 		}
-		// Model access tier: free users can only extend free-access models.
 		if (!variant.freeAccess) {
 			const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
 			if (!paid) {
@@ -268,6 +294,7 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 				});
 			}
 		}
+
 		let creditCost;
 		try {
 			creditCost = computeCreditCost({ modelKey: variant.key, resolution: source.quality, duration: source.duration });
@@ -281,7 +308,7 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			return res.status(400).json({ error: 'Insufficient credits' });
 		}
 
-		// Create the child video record (inherits settings from the source).
+		// Create a child video record representing the merged result-in-progress.
 		const newVideo = await pb.collection('videos').create({
 			user_id: req.pocketbaseUserId,
 			prompt: prompt.trim(),
@@ -294,6 +321,10 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			output_type: 'video',
 			credit_cost: creditCost,
 			parent_video_id: id,
+			// Store existing clips so the merge worker knows all clips to concat.
+			clip_urls: JSON.stringify(existingClipUrls),
+			// total_duration tracks cumulative seconds of the merged video.
+			total_duration: (source.total_duration || source.duration || 0),
 			share_token: randomBytes(16).toString('hex'),
 			...(idempotency_key && { idempotency_key }),
 		});
@@ -309,13 +340,20 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			video_id: newVideo.id,
 		});
 
-		// Fire-and-forget submission to the extend endpoint.
-		submitExtend(newVideo, source.external_id, source.model).catch((error) => {
-			logger.error(`Extend submission failed for ${newVideo.id}:`, error.message);
+		// Fire-and-forget: generate new clip, merge with existing, update record.
+		submitExtendAndMerge(newVideo, source.external_id, source.model, existingClipUrls).catch((error) => {
+			logger.error(`Extend+merge failed for ${newVideo.id}:`, error.message);
 		});
 
-		logger.info(`Video extend queued: source=${id} -> ${newVideo.id}, cost=${creditCost}`);
-		res.json({ video: { id: newVideo.id, status: newVideo.status, credit_cost: creditCost } });
+		logger.info(`Video extend queued: source=${id} -> ${newVideo.id}, cost=${creditCost}, existing_clips=${existingClipUrls.length}`);
+		res.json({
+			video: {
+				id: newVideo.id,
+				status: newVideo.status,
+				credit_cost: creditCost,
+				total_duration: newVideo.total_duration + source.duration,
+			},
+		});
 	} catch (error) {
 		logger.error('Extend video error:', error.message);
 		if ((error?.message || '').includes('not found') || error?.status === 404) {
@@ -326,37 +364,136 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 });
 
 /**
- * Submit an extend request to GeminiGen (async, fire-and-forget). Mirrors
- * submitToGeminiGen's failure/refund handling.
+ * Submit extend to GeminiGen, poll for the new clip, then merge all clips
+ * into a single video file and upload it to PocketBase.
+ *
+ * @param {Object}   videoRecord       - The newly-created extend video DB record.
+ * @param {string}   sourceUuid        - GeminiGen UUID of the latest clip (ref_history).
+ * @param {string}   sourceModel       - Model ID for routing to the correct endpoint.
+ * @param {string[]} existingClipUrls  - Ordered array of all prior clip URLs to prepend.
  */
-async function submitExtend(videoRecord, sourceUuid, sourceModel) {
+async function submitExtendAndMerge(videoRecord, sourceUuid, sourceModel, existingClipUrls) {
+	let tempDir = null;
 	try {
-		await pb.collection('videos').update(videoRecord.id, { status: 'processing' });
-		const result = await extendVideo({ prompt: videoRecord.prompt, ref_history: sourceUuid, model: sourceModel });
-		await pb.collection('videos').update(videoRecord.id, { external_id: result.uuid });
-		logger.info(`Extend submitted: video=${videoRecord.id}, external_id=${result.uuid}`);
-	} catch (error) {
-		logger.error(`Extend submission error for ${videoRecord.id}:`, error.message);
-		await pb.collection('videos').update(videoRecord.id, {
-			status: 'failed',
-			error_message: `Submission failed: ${error.message}`,
+		// 1. Submit the extend to GeminiGen
+		await pb.collection('videos').update(videoRecord.id, { status: 'generating' });
+		const result = await extendVideo({
+			prompt: videoRecord.prompt,
+			ref_history: sourceUuid,
+			model: sourceModel,
 		});
+
+		const newClipUuid = result.uuid;
+
+		// Store the new clip's UUID as external_id so the NEXT extend call uses it.
+		await pb.collection('videos').update(videoRecord.id, { external_id: newClipUuid });
+		logger.info(`Extend submitted: video=${videoRecord.id}, new_clip_uuid=${newClipUuid}`);
+
+		// 2. Poll GeminiGen until the new clip is ready
+		const newClipUrl = await pollUntilComplete(newClipUuid, videoRecord.id);
+
+		// 3. Build the full ordered clip list: existing clips + new clip
+		const allClipUrls = [...existingClipUrls, newClipUrl];
+
+		// 4. Download all clips and merge into one file
+		logger.info(`Merging ${allClipUrls.length} clips for video ${videoRecord.id}`);
+		tempDir = await createTempDir();
+		const mergedPath = await downloadAndMerge(allClipUrls, tempDir);
+
+		// 5. Upload merged file to PocketBase as a video file field
+		const mergedBuffer = await readFile(mergedPath);
+		const formData = new FormData();
+		const blob = new Blob([mergedBuffer], { type: 'video/mp4' });
+		formData.append('merged_video', blob, `merged_${videoRecord.id}.mp4`);
+
+		// Upload via PocketBase Files API — send as multipart to the videos record
+		const uploadResponse = await pb.collection('videos').update(videoRecord.id, formData);
+
+		// 6. Determine the public URL of the uploaded file
+		// PocketBase returns the filename; we construct the public URL from it.
+		const pbBaseUrl = process.env.POCKETBASE_URL || 'http://localhost:8090';
+		const uploadedFilename = uploadResponse.merged_video;
+		const mergedVideoUrl = uploadedFilename
+			? `${pbBaseUrl}/api/files/videos/${videoRecord.id}/${uploadedFilename}`
+			: null;
+
+		// 7. Update the video record with the merged result
+		const newTotalDuration = (videoRecord.total_duration || 0) + (videoRecord.duration || 0);
+		await pb.collection('videos').update(videoRecord.id, {
+			status: 'completed',
+			video_url: mergedVideoUrl || newClipUrl, // fallback to new clip URL if upload failed
+			clip_urls: JSON.stringify(allClipUrls),
+			total_duration: newTotalDuration,
+			completed_at: new Date().toISOString(),
+		});
+
+		logger.info(`Extend+merge complete: video=${videoRecord.id}, total_duration=${newTotalDuration}s, clips=${allClipUrls.length}`);
+
+	} catch (error) {
+		logger.error(`Extend+merge error for ${videoRecord.id}:`, error.message);
+
+		const rawMessage = error.message || '';
+		let userMessage = `Extension failed: ${rawMessage}`;
+		if (rawMessage.includes('INVALID_VIDEO_LENGTH')) {
+			userMessage = 'This video duration is not supported by the provider. Please try a shorter clip.';
+		}
+
 		try {
-			const user = await pb.collection('users').getOne(videoRecord.user_id);
-			const newBalance = user.credits_balance + (videoRecord.credit_cost || 0);
-			await pb.collection('users').update(videoRecord.user_id, { credits_balance: newBalance });
-			await pb.collection('transactions').create({
-				user_id: videoRecord.user_id,
-				type: 'refund',
-				amount: videoRecord.credit_cost || 0,
-				balance_after: newBalance,
-				description: 'Refund: Extend failed',
-				video_id: videoRecord.id,
+			await pb.collection('videos').update(videoRecord.id, {
+				status: 'failed',
+				error_message: userMessage,
 			});
-		} catch (refundError) {
-			logger.error('Extend refund error:', refundError.message);
+		} catch (updateErr) {
+			logger.error('Failed to mark extend as failed:', updateErr.message);
+		}
+
+		// Refund credits
+		if (videoRecord.credit_cost) {
+			try {
+				await refundCredits(pb, videoRecord.user_id, videoRecord.credit_cost, 'Refund: Extend failed', videoRecord.id);
+				logger.info(`Credits refunded for failed extend: ${videoRecord.id}`);
+			} catch (refundErr) {
+				logger.error('Extend refund error:', refundErr.message);
+			}
+		}
+	} finally {
+		if (tempDir) await cleanupTempDir(tempDir);
+	}
+}
+
+/**
+ * Poll GeminiGen until a clip is complete, then return its video URL.
+ * Uses the same timing config as generationProcessor.js.
+ *
+ * @param {string} uuid       - GeminiGen UUID to poll.
+ * @param {string} videoId    - Our DB video ID (for logging).
+ * @returns {Promise<string>} - Public URL of the completed clip.
+ */
+async function pollUntilComplete(uuid, videoId) {
+	for (let attempt = 1; attempt <= POLLING_CONFIG.maxAttempts; attempt++) {
+		await new Promise(resolve => setTimeout(resolve, POLLING_CONFIG.intervalMs));
+
+		try {
+			const status = await getGenerationStatus(uuid);
+			logger.info(`Extend poll #${attempt} for ${videoId}: status=${status.status}`);
+
+			if (status.status === GeminiGenStatus.COMPLETED) {
+				const url = status.video_url || status.media_url;
+				if (!url) throw new Error('GeminiGen returned completed status but no video URL');
+				return url;
+			}
+
+			if (status.status === GeminiGenStatus.FAILED) {
+				throw new Error(status.error_message || 'Extend clip generation failed on provider side');
+			}
+			// Status 1 = still processing, keep polling
+		} catch (pollErr) {
+			// Log transient errors but keep going unless it's a real failure
+			if (pollErr.message.includes('failed on provider side')) throw pollErr;
+			logger.warn(`Extend poll error (attempt ${attempt}) for ${videoId}: ${pollErr.message}`);
 		}
 	}
+	throw new Error(`Extend clip timed out after ${POLLING_CONFIG.maxAttempts} attempts`);
 }
 
 /**

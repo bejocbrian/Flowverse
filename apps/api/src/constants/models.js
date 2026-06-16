@@ -58,10 +58,10 @@ export const MODEL_VARIANTS = [
 		credits: { '480p': 25, '720p': 25 },
 		// Docs list 6, 10, 15 as valid durations. The live API currently
 		// rejects 15s with INVALID_VIDEO_LENGTH on some accounts/regions.
-		// Keeping 15s here since it's documented as valid; users will see
-		// a clear error if their account doesn't support it yet.
-		durations: [6, 10, 15],
-		maxDuration: 15,
+		// 15s is commented out until GeminiGen confirms it is fully enabled.
+		// To re-enable: add 15 back to the durations array and update maxDuration.
+		durations: [6, 10 /* , 15 */],
+		maxDuration: 10, // restore to 15 when 15s is enabled
 		aspectRatios: ['16:9', '9:16'],
 		imageModes: [],
 		maxRefImages: 0,

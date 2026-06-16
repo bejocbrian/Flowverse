@@ -18,8 +18,8 @@ export const VALIDATION = {
   MAX_ASPECT_RATIOS: ['16:9', '9:16', '1:1', '4:3'],
   DEFAULT_ASPECT_RATIO: '16:9',
   
-  // Duration options (seconds)
-  MAX_DURATIONS: [5, 6, 8, 10, 15, 20],
+  // Duration options (seconds) — 15 removed until Grok API supports it
+  MAX_DURATIONS: [5, 6, 8, 10, 20],
   DEFAULT_DURATION: 8,
   MIN_DURATION: 1,
   MAX_DURATION: 30,
