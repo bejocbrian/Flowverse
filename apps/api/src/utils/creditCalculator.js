@@ -13,7 +13,7 @@
  * The rupee markup lives in the wallet layer, not here.
  */
 
-import { MODEL_VARIANTS, getVariantByKey, variantResolutions } from '../constants/models.js';
+import { MODEL_VARIANTS, getVariantByKey, variantResolutions, chainedClipCount } from '../constants/models.js';
 
 export const DEFAULT_DURATION = 8;
 
@@ -72,8 +72,10 @@ export function creditCost({ modelKey, resolution, duration }) {
 		return Math.ceil(rate * secs);
 	}
 
-	// per_video / per_image -> flat
-	return Math.ceil(rate);
+	// per_video / per_image -> flat rate, but multiply by clip count for
+	// chained durations (e.g. Grok 20s = 2 clips = 2× the per-clip price).
+	const clips = chainedClipCount(variant, Number(duration));
+	return Math.ceil(rate) * clips;
 }
 
 /**
@@ -148,6 +150,11 @@ export function validateCatalog() {
 
 // Re-export so callers can resolve a variant's resolution set consistently.
 export { variantResolutions };
+
+// Re-export chain helpers so route handlers and workers can detect and route
+// chained durations without importing directly from constants/models.js.
+export { chainedClipCount } from '../constants/models.js';
+export { chainedClipDuration } from '../constants/models.js';
 
 /**
  * The lowest per-video credit cost among enabled, routed video models. Used by

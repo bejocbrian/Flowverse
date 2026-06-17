@@ -23,6 +23,11 @@ router.get('/', (_req, res) => {
 		imageModes: Array.isArray(m.imageModes) ? m.imageModes : [],
 		maxRefImages: Number.isFinite(m.maxRefImages) ? m.maxRefImages : 0,
 		freeAccess: m.freeAccess === true,
+		// chainedDurations: { duration -> clipCount } for multi-clip modes.
+		// Undefined/empty means all durations are single-clip.
+		...(m.chainedDurations && Object.keys(m.chainedDurations).length > 0
+			? { chainedDurations: m.chainedDurations }
+			: {}),
 		...variantPricingDisplay(m), // { billing, credits } or { billing, creditsPerSecond }
 	}));
 	res.json({ models });
