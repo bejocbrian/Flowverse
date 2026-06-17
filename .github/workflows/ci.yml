@@ -119,6 +119,8 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://api.placeholder.local' }}
           VITE_POCKETBASE_URL: ${{ secrets.VITE_POCKETBASE_URL || 'https://pb.placeholder.local' }}
+          VITE_CASHFREE_ENV: ${{ secrets.VITE_CASHFREE_ENV || 'sandbox' }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY || '' }}
         run: npm run build --workspace apps/web
 
       - name: Upload web build artifact
