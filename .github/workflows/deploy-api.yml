@@ -40,6 +40,10 @@ jobs:
       # Upload src + node_modules via FTP.
       # Hostinger Business Node.js apps are restarted from hPanel after deploy.
       # FTP works from GitHub runner IPs; SSH port 65002 is blocked.
+      #
+      # NOTE: After this step finishes, you must manually restart the Node.js
+      # app in hPanel (Websites → <site> → Node.js → Restart) so the new
+      # code takes effect. The old process keeps running until restarted.
       - name: Deploy API src via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -48,7 +52,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: apps/api/
-          server-dir: ${{ vars.FTP_API_REMOTE_DIR || './api/' }}
+          server-dir: ${{ vars.FTP_API_REMOTE_DIR || './' }}
           dangerous-clean-slate: false
           exclude: |
             **/.git*
@@ -56,3 +60,12 @@ jobs:
             **/.env
             **/.env.*
             **/npm-debug.log
+
+      - name: Remind to restart Node.js in hPanel
+        run: |
+          echo "=========================================================="
+          echo "  API files uploaded via FTP."
+          echo "  ACTION REQUIRED: Restart the Node.js app in hPanel."
+          echo "  hPanel → Websites → linen-herring-814961 → Node.js → Restart"
+          echo "  The old process is still running until you restart it."
+          echo "=========================================================="
