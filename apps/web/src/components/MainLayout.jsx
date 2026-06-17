@@ -13,6 +13,7 @@ const navItems = [
 	{ icon: 'dashboard', label: 'Dashboard', path: '/app/dashboard' },
 	{ icon: 'auto_awesome', label: 'Workspace', path: '/app/generate' },
 	{ icon: 'video_library', label: 'Library', path: '/app/library' },
+	{ icon: 'queue', label: 'Queue', path: '/app/queue' },
 	{ icon: 'analytics', label: 'Analytics', path: '/app/analytics' },
 	{ icon: 'account_balance_wallet', label: 'Wallet', path: '/app/wallet' },
 ];

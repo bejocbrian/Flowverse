@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
 	ArrowLeft,
 	Copy,
@@ -13,6 +13,7 @@ import {
 	Share2,
 	Sparkles,
 	Trash2,
+	Wand2,
 	XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -59,6 +60,9 @@ const VideoDetailPage = () => {
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState({}); // { delete, share, favorite }
 	const [regenOpen, setRegenOpen] = useState(false);
+	const [extendOpen, setExtendOpen] = useState(false);
+	const [extendPrompt, setExtendPrompt] = useState('');
+	const [extendLoading, setExtendLoading] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -112,6 +116,46 @@ const VideoDetailPage = () => {
 		} catch (err) {
 			toast.error(err.message);
 			setBusyKey('delete', false);
+		}
+	};
+
+	const handleExtend = async () => {
+		if (!extendPrompt.trim() || extendPrompt.trim().length < 3) {
+			toast.error('Describe what should happen next (a few words).');
+			return;
+		}
+		setExtendLoading(true);
+		try {
+			const idempotencyKey =
+				typeof crypto !== 'undefined' && crypto.randomUUID
+					? crypto.randomUUID()
+					: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+			const res = await apiServerClient.fetch(`/videos/${id}/extend`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					prompt: extendPrompt.trim(),
+					idempotency_key: idempotencyKey,
+				}),
+			});
+
+			if (!res.ok) {
+				const errData = await res.json().catch(() => ({}));
+				throw new Error(errData.error || `Extend failed (HTTP ${res.status})`);
+			}
+
+			const data = await res.json();
+			const newId = data.video?.id;
+			toast.success('Extension started — merging clips in the background');
+			setExtendOpen(false);
+			setExtendPrompt('');
+			// Navigate to the new merged video once it exists
+			if (newId) navigate(`/app/library/${newId}`);
+		} catch (err) {
+			toast.error(typeof err?.message === 'string' ? err.message : 'Extend failed');
+		} finally {
+			setExtendLoading(false);
 		}
 	};
 
@@ -251,6 +295,21 @@ const VideoDetailPage = () => {
 									Download
 								</button>
 
+								{/* Extend button — only for completed, non-image videos */}
+								{completed && !isImage && (
+									<button
+										onClick={() => setExtendOpen((v) => !v)}
+										className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-sm font-medium transition-colors ${
+											extendOpen
+												? 'border-[hsl(var(--accent-primary))]/40 bg-[hsl(var(--accent-primary))]/10 text-[hsl(var(--accent-primary))]'
+												: 'border-white/15 bg-white/[0.03] hover:bg-white/[0.07]'
+										}`}
+									>
+										<Wand2 className="w-3.5 h-3.5" />
+										Extend
+									</button>
+								)}
+
 								<button
 									onClick={() => setRegenOpen(true)}
 									disabled={!completed}
@@ -282,6 +341,56 @@ const VideoDetailPage = () => {
 									Delete
 								</button>
 							</div>
+
+							{/* Extend composer */}
+							<AnimatePresence>
+								{extendOpen && (
+									<motion.div
+										initial={{ opacity: 0, height: 0 }}
+										animate={{ opacity: 1, height: 'auto' }}
+										exit={{ opacity: 0, height: 0 }}
+										className="overflow-hidden"
+									>
+										<div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 flex flex-col gap-3">
+											<div>
+												<p className="text-sm font-medium mb-1 flex items-center gap-1.5">
+													<Wand2 className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
+													Extend this video
+												</p>
+												<p className="text-xs text-white/40">
+													Describe what happens next. A new clip will be generated and merged into a single continuous video.
+													{video.total_duration ? ` Current length: ${video.total_duration}s.` : ''}
+												</p>
+											</div>
+											<div className="flex items-center gap-2">
+												<input
+													type="text"
+													value={extendPrompt}
+													onChange={(e) => setExtendPrompt(e.target.value)}
+													onKeyDown={(e) => {
+														if (e.key === 'Enter' && !e.shiftKey) {
+															e.preventDefault();
+															handleExtend();
+														}
+													}}
+													placeholder="e.g. the camera pulls back to reveal a mountain range"
+													className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30 transition-colors"
+												/>
+												<button
+													onClick={handleExtend}
+													disabled={extendLoading || extendPrompt.trim().length < 3}
+													className="px-4 py-2 rounded-lg bg-white text-black text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 transition-opacity flex items-center gap-1.5"
+												>
+													{extendLoading
+														? <Loader2 className="w-4 h-4 animate-spin" />
+														: <Wand2 className="w-4 h-4" />}
+													Extend
+												</button>
+											</div>
+										</div>
+									</motion.div>
+								)}
+							</AnimatePresence>
 
 							{/* Related */}
 							{relatedVideos.length > 0 && (
@@ -360,7 +469,7 @@ const VideoDetailPage = () => {
 
 								<div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-xs">
 									<MetaRow label="Aspect" value={video.aspect_ratio} />
-									{!isImage && <MetaRow label="Duration" value={`${video.duration || 0}s`} />}
+									{!isImage && <MetaRow label="Duration" value={video.total_duration ? `${video.total_duration}s (merged)` : `${video.duration || 0}s`} />}
 									<MetaRow label="Quality" value={video.quality} />
 									<MetaRow label="Model" value={video.model} />
 									<MetaRow label="Cost" value={`${video.credit_cost ?? 0} cr`} />
@@ -410,6 +519,7 @@ const VideoDetailPage = () => {
 				isOpen={regenOpen}
 				onClose={() => setRegenOpen(false)}
 				defaultSettings={video}
+				originalPrompt={video?.prompt}
 			/>
 		</>
 	);

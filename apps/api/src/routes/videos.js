@@ -12,6 +12,17 @@ import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { uploadRefImages } from '../utils/refImageUpload.js';
 import { isPaidUser } from '../utils/userTier.js';
+import { 
+  sanitizePrompt, 
+  sanitizeNegativePrompt, 
+  validateResolution, 
+  validateAspectRatio, 
+  validateDuration,
+  validateOutputType,
+  validateImageMode,
+  validateRefImageCount,
+  validateIdempotencyKey
+} from '../utils/inputSanitizer.js';
 
 const router = Router();
 
@@ -76,15 +87,37 @@ router.get('/', async (req, res) => {
 router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, model_key, output_type, idempotency_key, image_mode, ref_images } = req.body;
 
-	if (!prompt || !provider || !model) {
-		return res.status(400).json({ error: 'prompt, provider, and model are required' });
+	// Validate and sanitize required fields
+	let sanitizedPrompt;
+	let sanitizedNegativePrompt;
+	let sanitizedAspectRatio;
+	let sanitizedDuration;
+	let sanitizedQuality;
+	let sanitizedOutputType;
+	let sanitizedIdempotencyKey;
+	let sanitizedImageMode;
+	
+	try {
+		sanitizedPrompt = sanitizePrompt(prompt);
+		sanitizedNegativePrompt = sanitizeNegativePrompt(negative_prompt);
+		sanitizedAspectRatio = validateAspectRatio(aspect_ratio);
+		sanitizedDuration = validateDuration(duration);
+		sanitizedQuality = validateResolution(quality);
+		sanitizedOutputType = validateOutputType(output_type);
+		sanitizedIdempotencyKey = validateIdempotencyKey(idempotency_key);
+	} catch (validationError) {
+		return res.status(400).json({ error: validationError.message });
+	}
+
+	if (!provider || !model) {
+		return res.status(400).json({ error: 'provider and model are required' });
 	}
 
 	// Idempotency: if the same user re-submits the same key within 5 minutes,
 	// return the existing video instead of creating a new charge. The key is
 	// generated client-side per "intent to generate" - retrying a failed
 	// network request reuses the key, two double-clicks reuse the key.
-	if (idempotency_key && typeof idempotency_key === 'string' && idempotency_key.length <= 100) {
+	if (sanitizedIdempotencyKey && typeof sanitizedIdempotencyKey === 'string' && sanitizedIdempotencyKey.length <= 100) {
 		try {
 			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 			const existing = await pb.collection('videos').getList(1, 1, {
@@ -119,7 +152,7 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 		}
 	}
 
-	const isImage = output_type === 'image';
+	const isImage = sanitizedOutputType === 'image';
 
 	// Resolve the catalog variant. The picker sends `model_key`; older clients
 	// may only send `model` (the vendor id) - fall back to the first enabled
@@ -173,13 +206,26 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 		if (supportedModes.length === 0) {
 			return res.status(400).json({ error: 'This model does not support reference images' });
 		}
-		resolvedImageMode = supportedModes.includes(image_mode) ? image_mode : supportedModes[0];
+		// Validate image_mode against supported modes
+		try {
+			sanitizedImageMode = validateImageMode(image_mode, supportedModes);
+		} catch (modeError) {
+			return res.status(400).json({ error: modeError.message });
+		}
+		resolvedImageMode = sanitizedImageMode || supportedModes[0];
 
-		// 'frame' allows at most 2 (start/end); everything else up to maxRefImages.
-		const maxForMode = resolvedImageMode === 'frame' ? 2 : (variant.maxRefImages || 1);
+		// 'frame' allows at most 2 (start/end); 'interpolation' requires EXACTLY 2;
+		// everything else up to maxRefImages.
+		const maxForMode = (resolvedImageMode === 'frame' || resolvedImageMode === 'interpolation') ? 2 : (variant.maxRefImages || 1);
 		if (ref_images.length > maxForMode) {
 			return res.status(400).json({
 				error: `Too many images for ${resolvedImageMode} mode (max ${maxForMode})`,
+			});
+		}
+		// Interpolation requires exactly 2 frames (first and last).
+		if (resolvedImageMode === 'interpolation' && ref_images.length !== 2) {
+			return res.status(400).json({
+				error: 'Interpolation mode requires exactly 2 images (first frame and last frame)',
 			});
 		}
 
@@ -226,23 +272,23 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 				credits_balance: newBalance,
 			});
 
-			// 3. Create video record with "queued" status
+			// 3. Create video record with "queued" status (using sanitized values)
 			const video = await ctx.create('videos', {
 				user_id: req.pocketbaseUserId,
-				prompt,
-				negative_prompt: negative_prompt || '',
+				prompt: sanitizedPrompt,
+				negative_prompt: sanitizedNegativePrompt,
 				status: 'queued',
-				aspect_ratio: aspect_ratio || '16:9',
-				duration: isImage ? 0 : (duration || 5),
-				quality: quality || 'standard',
+				aspect_ratio: sanitizedAspectRatio,
+				duration: isImage ? 0 : sanitizedDuration,
+				quality: sanitizedQuality,
 				provider,
 				model,
-				output_type: output_type || 'video',
+				output_type: sanitizedOutputType,
 				credit_cost: creditCost,
 				share_token: randomBytes(16).toString('hex'),
 				...(resolvedImageMode && { mode_image: resolvedImageMode }),
 				...(refImageUrls.length > 0 && { ref_image_urls: JSON.stringify(refImageUrls) }),
-				...(idempotency_key && { idempotency_key }),
+				...(sanitizedIdempotencyKey && { idempotency_key: sanitizedIdempotencyKey }),
 			});
 
 			// 4. Create transaction record
@@ -438,31 +484,6 @@ router.get('/:id/status', async (req, res) => {
 });
 
 // DELETE /videos/:id - Delete video
-router.delete('/:id', async (req, res) => {
-	const { id } = req.params;
-
-	try {
-		const video = await pb.collection('videos').getOne(id);
-
-		// Verify user owns this video
-		if (video.user_id !== req.pocketbaseUserId) {
-			return res.status(403).json({ error: 'Forbidden' });
-		}
-
-		await pb.collection('videos').delete(id);
-		logger.info(`Video deleted: ${id}`);
-
-		res.json({ success: true });
-	} catch (error) {
-		logger.error('Delete video error:', error.message);
-		if (error.message.includes('not found')) {
-			return res.status(404).json({ error: 'Video not found' });
-		}
-		throw error;
-	}
-});
-
-// DELETE /videos/:id - delete a video the authenticated user owns.
 // PocketBase delete rules already enforce user-scope, but we double-check
 // here so the API can return clean error codes.
 router.delete('/:id', async (req, res) => {

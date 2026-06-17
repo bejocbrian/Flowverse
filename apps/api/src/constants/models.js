@@ -56,12 +56,13 @@ export const MODEL_VARIANTS = [
 		type: 'video',
 		billing: 'per_video',
 		credits: { '480p': 25, '720p': 25 },
-		durations: [6, 10, 15],
-		maxDuration: 15,
+		// Docs list 6, 10, 15 as valid durations. The live API currently
+		// rejects 15s with INVALID_VIDEO_LENGTH on some accounts/regions.
+		// 15s is commented out until GeminiGen confirms it is fully enabled.
+		// To re-enable: add 15 back to the durations array and update maxDuration.
+		durations: [6, 10 /* , 15 */],
+		maxDuration: 10, // restore to 15 when 15s is enabled
 		aspectRatios: ['16:9', '9:16'],
-		// Grok accepts reference images via file_urls in the API, but we don't
-		// expose Frames/Ingredients for it in the UI (per product decision).
-		// If you want to enable it later, add: imageModes: ['reference'],
 		imageModes: [],
 		maxRefImages: 0,
 		routed: true,
@@ -76,11 +77,16 @@ export const MODEL_VARIANTS = [
 		billing: 'per_video',
 		// Both resolutions on ONE picker entry so users can choose quality.
 		// Same price either way (matches vendor pass-through).
-		credits: { '720p': 15, '1080p': 15 },
+		// 4K is 2x the cost of 1080p
+		credits: { '720p': 15, '1080p': 15, '4k': 30 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		// imageModes: 'frame' = start/end keyframes (1 or 2 images, order matters)
+		//             'ingredient' = subject/style references (1-3 images)
+		//             'interpolation' = exactly 2 frames; API interpolates between them
+		//             (interpolation maps to mode_image='frame' with exactly 2 refs)
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		routed: true,
 		enabled: true,
@@ -92,11 +98,11 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 15, '1080p': 15 },
+		credits: { '720p': 15, '1080p': 15, '4k': 30 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		// The ONLY model free users can generate with (both 720p & 1080p).
 		// All other models require a credit purchase.
@@ -132,11 +138,12 @@ export const MODEL_VARIANTS = [
 		provider: 'Google',
 		type: 'video',
 		billing: 'per_video',
-		credits: { '720p': 500, '1080p': 500 },
+		// 4K is 2x the cost of 1080p
+		credits: { '720p': 500, '1080p': 500, '4k': 1000 },
 		durations: [8],
 		maxDuration: 8,
 		aspectRatios: ['16:9', '9:16'],
-		imageModes: ['frame', 'ingredient'],
+		imageModes: ['frame', 'ingredient', 'interpolation'],
 		maxRefImages: 3,
 		routed: true,
 		enabled: true,

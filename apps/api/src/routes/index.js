@@ -24,6 +24,8 @@ import videoSharingRouter from './video-sharing.js';
 import videoFavoritesRouter from './video-favorites.js';
 import promptHistoryRouter from './prompt-history.js';
 import videoRegenerateRouter from './video-regenerate.js';
+import batchRouter from './batch.js';
+import previewRouter from './preview.js';
 
 export default () => {
 	const router = Router();
@@ -54,6 +56,8 @@ export default () => {
 	router.use('/webhooks', paytmWebhookRouter);
 	router.use('/settings', settingsRouter);
 	router.use('/prompts', promptHistoryRouter);
+	router.use('/batch', batchRouter);
+	router.use('/preview', previewRouter);
 	router.use('/admin/providers', adminProvidersRouter);
 	router.use('/admin/users', adminUsersRouter);
 	router.use('/admin/settings', adminSettingsRouter);

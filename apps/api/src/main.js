@@ -39,13 +39,6 @@ process.on('SIGINT', () => {
 	process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-	logger.info('SIGTERM signal received');
-	await new Promise(resolve => setTimeout(resolve, 3000));
-	logger.info('Exiting');
-	process.exit();
-});
-
 // Build CORS config:
 // - If CORS_ORIGIN is "*" we cannot use credentials:true (browsers reject it).
 // - Comma-separated list lets you whitelist multiple frontends.
@@ -90,8 +83,48 @@ app.use((req, res) => {
 
 const port = process.env.PORT || 3001;
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
 	logger.info(`API Server running on port ${port}`);
 });
+
+/* ------------------------------------------------------------------
+ * Graceful shutdown
+ * On SIGTERM (or SIGINT) we:
+ *   1. Stop accepting new connections
+ *   2. Wait up to 30 s for in-flight requests to finish
+ *   3. Exit cleanly
+ * ------------------------------------------------------------------*/
+const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '30000', 10);
+
+let shuttingDown = false;
+
+function gracefulShutdown(signal) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+
+	logger.info(`${signal} received — starting graceful shutdown (timeout: ${SHUTDOWN_TIMEOUT_MS}ms)`);
+
+	// Stop accepting new connections
+	server.close((err) => {
+		if (err) {
+			logger.error('Error during server close:', err.message);
+		} else {
+			logger.info('HTTP server closed — all connections drained');
+		}
+		process.exit(err ? 1 : 0);
+	});
+
+	// Force-exit if connections are still open after the timeout
+	const forceTimer = setTimeout(() => {
+		logger.error(`Graceful shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms — forcing exit`);
+		process.exit(1);
+	}, SHUTDOWN_TIMEOUT_MS);
+
+	// Don't hold the process open for the timer itself
+	if (forceTimer.unref) forceTimer.unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export default app;
