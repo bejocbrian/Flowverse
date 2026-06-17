@@ -105,7 +105,7 @@ class ErrorBoundary extends React.Component {
                   </button>
                 )}
               </div>
-              {process.env.NODE_ENV === 'development' && this.state.error && (
+              {import.meta.env.DEV && this.state.error && (
                 <details className="mt-6 text-left text-xs text-[hsl(var(--text-secondary))]">
                   <summary className="cursor-pointer mb-2">Error Details</summary>
                   <pre className="p-2 bg-gray-100 rounded overflow-auto max-h-40">
@@ -150,7 +150,7 @@ class ErrorBoundary extends React.Component {
               </div>
             </div>
           </div>
-          {process.env.NODE_ENV === 'development' && this.state.error && (
+          {import.meta.env.DEV && this.state.error && (
             <details className="mt-3 text-xs">
               <summary className="cursor-pointer text-red-600">Error Details</summary>
               <pre className="mt-2 p-2 bg-red-100 rounded overflow-auto max-h-32">

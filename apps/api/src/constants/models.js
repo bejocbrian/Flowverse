@@ -56,12 +56,16 @@ export const MODEL_VARIANTS = [
 		type: 'video',
 		billing: 'per_video',
 		credits: { '480p': 25, '720p': 25 },
-		// Docs list 6, 10, 15 as valid durations. The live API currently
-		// rejects 15s with INVALID_VIDEO_LENGTH on some accounts/regions.
-		// 15s is commented out until GeminiGen confirms it is fully enabled.
-		// To re-enable: add 15 back to the durations array and update maxDuration.
-		durations: [6, 10 /* , 15 */],
-		maxDuration: 10, // restore to 15 when 15s is enabled
+		// GeminiGen hard-caps the Grok endpoint at 10s per clip.
+		// 15s is listed in xAI's docs but returns INVALID_VIDEO_LENGTH on
+		// GeminiGen — tested 2026-06-15. Keeping it here as a disabled
+		// placeholder so it can be re-enabled without code changes once
+		// GeminiGen supports it. Set enabled: false on this entry or remove
+		// 15 from durations to keep it hidden from users.
+		durations: [6, 10],
+		maxDuration: 10,
+		// durations: [6, 10, 15],   // ← restore when GeminiGen raises the cap
+		// maxDuration: 15,
 		aspectRatios: ['16:9', '9:16'],
 		imageModes: [],
 		maxRefImages: 0,
@@ -414,4 +418,23 @@ export function getEnabledModels() {
 
 export function getVariantByKey(key) {
 	return MODEL_VARIANTS.find((m) => m.key === key) || null;
+}
+
+/**
+ * For a given variant and duration, return how many real API clips are needed.
+ * Returns 1 for normal durations, >1 for chained durations (e.g. Grok 20s = 2 clips).
+ */
+export function chainedClipCount(variant, duration) {
+	if (!variant?.chainedDurations) return 1;
+	return variant.chainedDurations[duration] ?? 1;
+}
+
+/**
+ * For a chained duration, return the per-clip duration to send to the vendor.
+ * Currently all chained durations use 10s clips.
+ */
+export function chainedClipDuration(variant, duration) {
+	const count = chainedClipCount(variant, duration);
+	if (count <= 1) return duration;
+	return Math.round(duration / count); // e.g. 20 / 2 = 10
 }

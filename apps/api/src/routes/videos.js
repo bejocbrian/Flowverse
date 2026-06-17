@@ -283,6 +283,7 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 				quality: sanitizedQuality,
 				provider,
 				model,
+				model_key: variant.key,
 				output_type: sanitizedOutputType,
 				credit_cost: creditCost,
 				share_token: randomBytes(16).toString('hex'),
