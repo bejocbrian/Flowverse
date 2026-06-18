@@ -42,26 +42,32 @@ Go to **GitHub → your repo → Settings → Secrets and variables → Actions*
 
 ### Secrets (encrypted, never shown in logs)
 
+**Web (bisque-hamster-792062) — static frontend:**
+
 | Secret name | What it is |
 |-------------|-----------|
-| `FTP_HOST` | FTP hostname from Hostinger hPanel (e.g. `ftp.linen-herring-814961.hostingersite.com`) |
-| `FTP_USERNAME` | FTP username from hPanel |
-| `FTP_PASSWORD` | FTP password from hPanel |
+| `FTP_HOST` | FTP IP/hostname (e.g. `82.112.239.205`) |
+| `FTP_USERNAME` | FTP username (e.g. `u853826912.bisque-hamster-792062.hostingersite.com`) |
+| `FTP_PASSWORD` | FTP password for the web site |
+
+**API (linen-herring-814961) — Node.js backend:**
+
+| Secret name | What it is |
+|-------------|-----------|
+| `FTP_API_HOST` | FTP IP/hostname (same server: `82.112.239.205`) |
+| `FTP_API_USERNAME` | FTP username (e.g. `u853826912.linen-herring-814961.hostingersite.com`) |
+| `FTP_API_PASSWORD` | FTP password for the API site |
+
+**Build secrets (used during Vite build):**
+
+| Secret name | What it is |
+|-------------|-----------|
 | `VITE_API_URL` | Full URL of your API, e.g. `https://linen-herring-814961.hostingersite.com` |
 | `VITE_POCKETBASE_URL` | Full URL of your PocketBase instance |
 | `VITE_CASHFREE_ENV` | `sandbox` or `production` |
-| `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile site key (public, but kept here for easy rotation) |
+| `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile site key |
 
-### Variables (plain text, visible in logs — non-secret config)
-
-| Variable name | Default | What it is |
-|---------------|---------|-----------|
-| `FTP_PORT` | `21` | FTP port (Hostinger uses 21) |
-| `FTP_REMOTE_DIR` | `./` | Remote dir for the **web** static files (document root of the frontend site) |
-| `FTP_API_REMOTE_DIR` | `./api/` | Remote dir for the **API** files on the Node.js app |
-| `SITE_DOMAIN` | `bisque-hamster-792062.hostingersite.com` | Your site domain for verification |
-
-> If the defaults are wrong for your Hostinger directory layout, set these as Variables (not Secrets).
+> **Note:** Web and API are on separate Hostinger sites with different FTP accounts. Each needs its own set of FTP secrets.
 
 ---
 
