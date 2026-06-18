@@ -1,5 +1,5 @@
 import React from 'react';
-import { cn } from '@/utils/classNameUtils.js';
+import { cn } from '@/lib/utils.js';
 
 const Card = ({ children, className, variant = 'default', ...props }) => {
   const variants = {

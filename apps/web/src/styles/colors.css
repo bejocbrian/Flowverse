@@ -1,9 +1,0 @@
-/* Glass & Slate — Color Overrides
-   These are imported alongside index.css. They are kept for backward compat
-   but the primary token source is now index.css :root. */
-@layer base {
-  :root {
-    /* All tokens are now defined in index.css.
-       This file preserved for import compatibility. */
-  }
-}

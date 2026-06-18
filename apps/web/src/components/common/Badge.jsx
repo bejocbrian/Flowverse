@@ -1,5 +1,5 @@
 import React from 'react';
-import { cn } from '@/utils/classNameUtils.js';
+import { cn } from '@/lib/utils.js';
 
 const Badge = ({ children, className, variant = 'primary' }) => {
   const variants = {

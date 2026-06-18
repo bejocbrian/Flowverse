@@ -5,7 +5,7 @@ import Heading from '@/components/common/Heading.jsx';
 import Text from '@/components/common/Text.jsx';
 import Button from '@/components/common/Button.jsx';
 import Badge from '@/components/common/Badge.jsx';
-import { cn } from '@/utils/classNameUtils.js';
+import { cn } from '@/lib/utils.js';
 import { Link } from 'react-router-dom';
 import { ROUTES } from '@/config/routes.js';
 

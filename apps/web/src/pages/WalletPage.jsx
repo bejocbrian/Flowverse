@@ -53,19 +53,7 @@ const TYPE_META = {
 	purchase: { label: 'Purchase', icon: CreditCard, accent: 'text-emerald-300' },
 };
 
-function timeAgo(iso) {
-	if (!iso) return '';
-	const ms = Date.now() - new Date(iso).getTime();
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s ago`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ago`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h ago`;
-	const d = Math.floor(h / 86400);
-	if (d < 7) return `${d}d ago`;
-	return new Date(iso).toLocaleDateString();
-}
+import useTimeAgo from '@/hooks/useTimeAgo.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Page                                                                      */
@@ -84,6 +72,8 @@ const WalletPage = () => {
 	const [packs, setPacks] = useState([]);
 	// Cheapest per-video credit cost, used to show "≈ N videos" per pack.
 	const [videoUnitCredits, setVideoUnitCredits] = useState(null);
+
+	const timeAgo = useTimeAgo();
 
 	useEffect(() => {
 		// Load credit packs from the server (authoritative price + credits).

@@ -26,12 +26,12 @@ const SignupPage = () => {
 		e.preventDefault();
 
 		if (!acceptTerms) {
-			toast('Please accept the terms and conditions');
+			toast.error('Please accept the terms and conditions');
 			return;
 		}
 
 		if (TURNSTILE_REQUIRED && !turnstileToken) {
-			toast('Please complete the captcha');
+			toast.error('Please complete the captcha');
 			return;
 		}
 

@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
+import { Toggle } from '@/components/ui/toggle.jsx';
 
 /* -------------------------------------------------------------------------- */
 /*  Section primitives                                                        */
@@ -37,25 +38,6 @@ const SectionHeader = ({ icon: Icon, title, sub }) => (
 			{sub && <p className="text-xs text-white/50 mt-0.5">{sub}</p>}
 		</div>
 	</div>
-);
-
-const Toggle = ({ checked, onChange, disabled }) => (
-	<button
-		type="button"
-		role="switch"
-		aria-checked={checked}
-		disabled={disabled}
-		onClick={() => onChange(!checked)}
-		className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
-			checked ? 'bg-[hsl(var(--accent-primary-container))]' : 'bg-white/10'
-		}`}
-	>
-		<span
-			className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-				checked ? 'translate-x-5' : 'translate-x-0.5'
-			}`}
-		/>
-	</button>
 );
 
 /* -------------------------------------------------------------------------- */

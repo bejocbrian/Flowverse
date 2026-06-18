@@ -20,6 +20,16 @@ import { toast } from 'sonner';
 import VideoPlayer from '@/components/VideoPlayer.jsx';
 import RegenerateModal from '@/components/RegenerateModal.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
+import {
+	AlertDialog,
+	AlertDialogContent,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogDescription,
+	AlertDialogCancel,
+	AlertDialogAction,
+} from '@/components/ui/alert-dialog.jsx';
+import { Toggle } from '@/components/ui/toggle.jsx';
 
 const STATUS_BADGE = {
 	completed: { label: 'Completed', className: 'bg-emerald-500/15 text-emerald-300' },
@@ -29,28 +39,12 @@ const STATUS_BADGE = {
 	failed: { label: 'Failed', className: 'bg-red-500/15 text-red-300' },
 };
 
-/* -------------------------------------------------------------------------- */
-
-const Toggle = ({ checked, onChange, disabled }) => (
-	<button
-		type="button"
-		role="switch"
-		aria-checked={checked}
-		disabled={disabled}
-		onClick={() => onChange(!checked)}
-		className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
-			checked ? 'bg-[hsl(var(--accent-primary-container))]' : 'bg-white/10'
-		}`}
-	>
-		<span
-			className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-				checked ? 'translate-x-5' : 'translate-x-0.5'
-			}`}
-		/>
-	</button>
+const MetaRow = ({ label, value }) => (
+	<div>
+		<span className="text-white/40">{label}</span>
+		<span className="ml-1.5 text-white/70">{value || '—'}</span>
+	</div>
 );
-
-/* -------------------------------------------------------------------------- */
 
 const VideoDetailPage = () => {
 	const { id } = useParams();
@@ -58,11 +52,13 @@ const VideoDetailPage = () => {
 	const [video, setVideo] = useState(null);
 	const [relatedVideos, setRelatedVideos] = useState([]);
 	const [loading, setLoading] = useState(true);
+
 	const [busy, setBusy] = useState({}); // { delete, share, favorite }
 	const [regenOpen, setRegenOpen] = useState(false);
 	const [extendOpen, setExtendOpen] = useState(false);
 	const [extendPrompt, setExtendPrompt] = useState('');
 	const [extendLoading, setExtendLoading] = useState(false);
+	const [deleteConfirm, setDeleteConfirm] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -105,8 +101,11 @@ const VideoDetailPage = () => {
 		window.open(video.video_url, '_blank', 'noopener');
 	};
 
-	const handleDelete = async () => {
-		if (!window.confirm('Delete this video? This cannot be undone.')) return;
+	const handleDelete = () => {
+		setDeleteConfirm(true);
+	};
+
+	const confirmDelete = async () => {
 		setBusyKey('delete', true);
 		try {
 			const res = await apiServerClient.fetch(`/videos/${id}`, { method: 'DELETE' });
@@ -116,6 +115,8 @@ const VideoDetailPage = () => {
 		} catch (err) {
 			toast.error(err.message);
 			setBusyKey('delete', false);
+		} finally {
+			setDeleteConfirm(false);
 		}
 	};
 
@@ -521,15 +522,25 @@ const VideoDetailPage = () => {
 				defaultSettings={video}
 				originalPrompt={video?.prompt}
 			/>
+			<AlertDialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
+				<AlertDialogContent className="bg-[hsl(var(--surface))] border-[hsl(var(--border))]">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete video</AlertDialogTitle>
+						<AlertDialogDescription>
+							This action cannot be undone. The video will be permanently removed from
+							your library.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="flex justify-end gap-2">
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={confirmDelete} className="bg-red-500 hover:bg-red-600">
+							Delete
+						</AlertDialogAction>
+					</div>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 };
-
-const MetaRow = ({ label, value }) => (
-	<div className="flex items-center justify-between gap-2">
-		<span className="text-white/40 font-mono uppercase tracking-wider">{label}</span>
-		<span className="font-mono truncate text-right">{value || '—'}</span>
-	</div>
-);
 
 export default VideoDetailPage;

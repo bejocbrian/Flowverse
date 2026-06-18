@@ -73,7 +73,7 @@ const OnboardingPage = () => {
 	const handleNext = async () => {
 		if (step === 0) {
 			if (!useCase) {
-				toast('Pick a use case to continue');
+				toast.error('Pick a use case to continue');
 				return;
 			}
 			// Persist the use case the moment it's chosen so even if the user

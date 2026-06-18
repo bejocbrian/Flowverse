@@ -23,7 +23,7 @@ const LoginPage = () => {
 		e.preventDefault();
 
 		if (TURNSTILE_REQUIRED && !turnstileToken) {
-			toast('Please complete the captcha');
+			toast.error('Please complete the captcha');
 			return;
 		}
 

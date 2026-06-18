@@ -17,6 +17,16 @@ import {
 import { toast } from 'sonner';
 import apiServerClient from '@/lib/apiServerClient.js';
 import pb from '@/lib/pocketbaseClient.js';
+import {
+	AlertDialog,
+	AlertDialogTrigger,
+	AlertDialogContent,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogDescription,
+	AlertDialogCancel,
+	AlertDialogAction,
+} from '@/components/ui/alert-dialog.jsx';
 
 const FILTER_OPTIONS = [
 	{ key: 'all', label: 'All' },
@@ -208,6 +218,7 @@ const LibraryPage = () => {
 	const [filterType, setFilterType] = useState('all');
 	const [sortBy, setSortBy] = useState('newest');
 	const [search, setSearch] = useState('');
+	const [deleteId, setDeleteId] = useState(null);
 
 	const fetchVideos = async () => {
 		setLoading(true);
@@ -227,16 +238,22 @@ const LibraryPage = () => {
 		fetchVideos();
 	}, []);
 
-	const handleDelete = async (id) => {
-		if (!window.confirm('Delete this video?')) return;
+	const handleDelete = (id) => {
+		setDeleteId(id);
+	};
+
+	const confirmDelete = async () => {
+		if (!deleteId) return;
 		try {
 			// Use PB directly: the API delete endpoint isn't exposed here yet and
 			// PB enforces user-scoped delete rules.
-			await pb.collection('videos').delete(id, { $autoCancel: false });
-			setVideos((prev) => prev.filter((v) => v.id !== id));
+			await pb.collection('videos').delete(deleteId, { $autoCancel: false });
+			setVideos((prev) => prev.filter((v) => v.id !== deleteId));
 			toast.success('Deleted');
 		} catch {
 			toast.error('Failed to delete');
+		} finally {
+			setDeleteId(null);
 		}
 	};
 
@@ -385,6 +402,24 @@ const LibraryPage = () => {
 					)}
 				</div>
 			</div>
+
+			<AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+				<AlertDialogContent className="bg-[hsl(var(--surface))] border-[hsl(var(--border))]">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete video</AlertDialogTitle>
+						<AlertDialogDescription>
+							This action cannot be undone. The video will be permanently removed from
+							your library.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="flex justify-end gap-2">
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={confirmDelete} className="bg-red-500 hover:bg-red-600">
+							Delete
+						</AlertDialogAction>
+					</div>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 };

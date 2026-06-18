@@ -8,14 +8,27 @@ import {
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu.jsx';
 import { motion } from 'framer-motion';
+import {
+	LayoutDashboard,
+	Wand2,
+	Video,
+	ListTodo,
+	BarChart3,
+	Wallet,
+	ArrowLeft,
+	CreditCard,
+	Settings,
+	LogOut,
+	User,
+} from 'lucide-react';
 
 const navItems = [
-	{ icon: 'dashboard', label: 'Dashboard', path: '/app/dashboard' },
-	{ icon: 'auto_awesome', label: 'Workspace', path: '/app/generate' },
-	{ icon: 'video_library', label: 'Library', path: '/app/library' },
-	{ icon: 'queue', label: 'Queue', path: '/app/queue' },
-	{ icon: 'analytics', label: 'Analytics', path: '/app/analytics' },
-	{ icon: 'account_balance_wallet', label: 'Wallet', path: '/app/wallet' },
+	{ icon: LayoutDashboard, label: 'Dashboard', path: '/app/dashboard' },
+	{ icon: Wand2, label: 'Workspace', path: '/app/generate' },
+	{ icon: Video, label: 'Library', path: '/app/library' },
+	{ icon: ListTodo, label: 'Queue', path: '/app/queue' },
+	{ icon: BarChart3, label: 'Analytics', path: '/app/analytics' },
+	{ icon: Wallet, label: 'Wallet', path: '/app/wallet' },
 ];
 
 const MainLayout = ({ children }) => {
@@ -34,7 +47,7 @@ const MainLayout = ({ children }) => {
 						className="p-2 hover:bg-white/10 rounded-full transition-all"
 						aria-label="Back"
 					>
-						<span className="material-symbols-outlined text-xl">arrow_back</span>
+						<ArrowLeft className="w-5 h-5" />
 					</button>
 					<button
 						onClick={() => navigate('/app/dashboard')}
@@ -52,7 +65,7 @@ const MainLayout = ({ children }) => {
 						className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 text-xs font-medium hover:bg-white/5 transition-all"
 						aria-label="Credits balance"
 					>
-						<span className="material-symbols-outlined text-base text-yellow-300">paid</span>
+						<CreditCard className="w-4 h-4 text-yellow-300" />
 						<span>{currentUser?.credits_balance ?? 0}</span>
 					</button>
 					<button
@@ -60,7 +73,7 @@ const MainLayout = ({ children }) => {
 						className="p-2 hover:bg-white/10 rounded-full transition-all text-white/60"
 						aria-label="Settings"
 					>
-						<span className="material-symbols-outlined text-xl">settings</span>
+						<Settings className="w-5 h-5" />
 					</button>
 
 					<DropdownMenu>
@@ -84,14 +97,14 @@ const MainLayout = ({ children }) => {
 								onClick={() => navigate('/app/settings')}
 								className="hover:bg-white/5 cursor-pointer py-2 px-4 flex items-center gap-2"
 							>
-								<span className="material-symbols-outlined text-lg">settings</span>
+								<Settings className="w-4 h-4" />
 								Settings
 							</DropdownMenuItem>
 							<DropdownMenuItem
 								onClick={logout}
 								className="hover:bg-white/5 cursor-pointer py-2 px-4 flex items-center gap-2 text-red-400"
 							>
-								<span className="material-symbols-outlined text-lg">logout</span>
+								<LogOut className="w-4 h-4" />
 								Sign out
 							</DropdownMenuItem>
 						</DropdownMenuContent>
@@ -101,30 +114,33 @@ const MainLayout = ({ children }) => {
 
 			<div className="flex flex-1 overflow-hidden">
 				<nav className="w-16 flex flex-col items-center py-6 gap-3 border-r border-white/5 shrink-0">
-					{navItems.map((item) => (
-						<button
-							key={item.path}
-							onClick={() => navigate(item.path)}
-							title={item.label}
-							className={`p-2 rounded-xl transition-all duration-300 relative group ${
-								isActive(item.path)
-									? 'bg-white/10 text-white'
-									: 'text-white/40 hover:text-white hover:bg-white/5'
-							}`}
-							aria-label={item.label}
-						>
-							<span className="material-symbols-outlined text-[26px]">{item.icon}</span>
-							{isActive(item.path) && (
-								<motion.div
-									layoutId="activeNav"
-									className="absolute left-[-1px] top-1/4 bottom-1/4 w-[3px] bg-white rounded-r-full"
-								/>
-							)}
-							<div className="absolute left-16 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-[#1a1b1e] text-xs font-medium rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100]">
-								{item.label}
-							</div>
-						</button>
-					))}
+					{navItems.map((item) => {
+						const Icon = item.icon;
+						return (
+							<button
+								key={item.path}
+								onClick={() => navigate(item.path)}
+								title={item.label}
+								className={`p-2 rounded-xl transition-all duration-300 relative group ${
+									isActive(item.path)
+										? 'bg-white/10 text-white'
+										: 'text-white/40 hover:text-white hover:bg-white/5'
+								}`}
+								aria-label={item.label}
+							>
+								<Icon className="w-6 h-6" />
+								{isActive(item.path) && (
+									<motion.div
+										layoutId="activeNav"
+										className="absolute left-[-1px] top-1/4 bottom-1/4 w-[3px] bg-white rounded-r-full"
+									/>
+								)}
+								<div className="absolute left-16 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-[#1a1b1e] text-xs font-medium rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-[100]">
+									{item.label}
+								</div>
+							</button>
+						);
+					})}
 				</nav>
 
 				<main className="flex-1 overflow-auto flex flex-col relative bg-black">{children}</main>

@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import apiServerClient from '@/lib/apiServerClient.js';
 import { toast } from 'sonner';
+import useTimeAgo from '@/hooks/useTimeAgo.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
@@ -35,20 +36,6 @@ function formatNumber(n) {
 	if (n === null || n === undefined) return '–';
 	if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
 	return String(n);
-}
-
-function timeAgo(iso) {
-	if (!iso) return '';
-	const ms = Date.now() - new Date(iso).getTime();
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s ago`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ago`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h ago`;
-	const d = Math.floor(h / 24);
-	if (d < 7) return `${d}d ago`;
-	return new Date(iso).toLocaleDateString();
 }
 
 const STATUS_BADGE = {
@@ -131,6 +118,8 @@ const AnalyticsPage = () => {
 	const [recent, setRecent] = useState(null);
 	const [loading, setLoading] = useState(true);
 	const [windowDays, setWindowDays] = useState(30);
+
+	const timeAgo = useTimeAgo();
 
 	useEffect(() => {
 		let cancelled = false;

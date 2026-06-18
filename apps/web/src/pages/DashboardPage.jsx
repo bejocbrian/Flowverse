@@ -16,6 +16,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
 import { toast } from 'sonner';
+import useTimeAgo from '@/hooks/useTimeAgo.js';
 
 /* -------------------------------------------------------------------------- */
 
@@ -26,20 +27,6 @@ const STATUS_BADGE = {
 	generating: { label: 'Generating', className: 'bg-blue-500/15 text-blue-300' },
 	failed: { label: 'Failed', className: 'bg-red-500/15 text-red-300' },
 };
-
-function timeAgo(iso) {
-	if (!iso) return '';
-	const ms = Date.now() - new Date(iso).getTime();
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s ago`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ago`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h ago`;
-	const d = Math.floor(h / 86400);
-	if (d < 7) return `${d}d ago`;
-	return new Date(iso).toLocaleDateString();
-}
 
 /* -------------------------------------------------------------------------- */
 
@@ -56,7 +43,7 @@ const StatPill = ({ icon: Icon, label, value, hint, accent }) => (
 	</div>
 );
 
-const Tile = ({ video }) => {
+const Tile = ({ video, timeAgo }) => {
 	const isImage = video.output_type === 'image';
 	const completed = video.status === 'completed' && !!video.video_url;
 	const failed = video.status === 'failed';
@@ -152,6 +139,8 @@ const DashboardPage = () => {
 		if (h < 21) return 'Good evening';
 		return 'Working late';
 	}, []);
+
+	const timeAgo = useTimeAgo();
 
 	// Prefer the balance from the analytics overview (fetched fresh from the
 	// server on mount) over the cached authStore value, so admin credit
@@ -287,11 +276,11 @@ const DashboardPage = () => {
 									</Link>
 								</div>
 							) : (
-								<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-									{recent.videos.map((v) => (
-										<Tile key={v.id} video={v} />
-									))}
-								</div>
+							<div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+								{recent.videos.map((v) => (
+									<Tile key={v.id} video={v} timeAgo={timeAgo} />
+								))}
+							</div>
 							)}
 						</div>
 
