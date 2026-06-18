@@ -95,7 +95,7 @@ const QueuePage = () => {
   return (
     <>
       <Helmet>
-        <title>Queue — Aether Video</title>
+        <title>Queue — FlowVerse</title>
       </Helmet>
 
       <div className="flex flex-col gap-6 px-4 sm:px-6 py-6 max-w-4xl mx-auto w-full">

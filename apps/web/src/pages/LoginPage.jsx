@@ -43,8 +43,8 @@ const LoginPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Sign in - Aether Video</title>
-				<meta name="description" content="Sign in to your Aether Video account" />
+				<title>Sign in - FlowVerse</title>
+				<meta name="description" content="Sign in to your FlowVerse account" />
 			</Helmet>
 
 			<div className="min-h-screen flex items-center justify-center px-4 py-12 bg-[hsl(var(--canvas))] gradient-hero">
@@ -54,7 +54,7 @@ const LoginPage = () => {
 							<span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] grid place-items-center">
 								<Sparkles className="w-3.5 h-3.5 text-[hsl(var(--canvas))]" />
 							</span>
-							Aether Video
+							FlowVerse
 						</Link>
 					</div>
 

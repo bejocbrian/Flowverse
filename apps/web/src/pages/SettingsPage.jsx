@@ -152,7 +152,7 @@ const SettingsPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Settings - Aether Video</title>
+				<title>Settings - FlowVerse</title>
 			</Helmet>
 
 			<div className="flex-1 overflow-y-auto bg-black text-white">

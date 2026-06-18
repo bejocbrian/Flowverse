@@ -497,8 +497,31 @@ router.delete('/:id', async (req, res) => {
 		if (video.user_id !== req.pocketbaseUserId) {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
+
+		// Orphan cleanup: delete associated PocketBase files before deleting the record
+		const filesToDelete = [];
+		if (video.video_url) {
+			// Extract file path from PocketBase file URL
+			const videoFileMatch = video.video_url.match(/\/files\/[^/]+\/([^?]+)/);
+			if (videoFileMatch) filesToDelete.push({ collection: 'videos', recordId: id, fileName: videoFileMatch[1] });
+		}
+		if (video.thumbnail_url) {
+			const thumbFileMatch = video.thumbnail_url.match(/\/files\/[^/]+\/([^?]+)/);
+			if (thumbFileMatch) filesToDelete.push({ collection: 'videos', recordId: id, fileName: thumbFileMatch[1] });
+		}
+
 		await pb.collection('videos').delete(id);
 		logger.info(`Video deleted via API: ${id}`);
+
+		// Delete files after record deletion (best-effort)
+		for (const f of filesToDelete) {
+			try {
+				await pb.files.delete(f.collection, f.recordId, f.fileName);
+			} catch (fileErr) {
+				logger.warn(`Orphan file cleanup failed for ${f.fileName}: ${fileErr.message}`);
+			}
+		}
+
 		return res.json({ success: true });
 	} catch (error) {
 		logger.error('Delete video error:', error.message);

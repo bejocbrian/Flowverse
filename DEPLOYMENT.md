@@ -1,4 +1,4 @@
-# Deployment Guide — AetherVideo (Hostinger)
+# Deployment Guide — FlowVerse (Hostinger)
 
 > **TL;DR:** Push to `main` → GitHub Actions builds & FTP-deploys automatically.  
 > Frontend is static files on Hostinger. Backend is a Node.js app on Hostinger.  

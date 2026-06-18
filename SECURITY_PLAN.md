@@ -1,4 +1,4 @@
-# Aether Video — Abuse Defense Plan
+# FlowVerse — Abuse Defense Plan
 
 A living document. Tracks what's shipped, what's pending, and what's queued for later.
 

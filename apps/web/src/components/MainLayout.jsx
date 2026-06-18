@@ -40,7 +40,7 @@ const MainLayout = ({ children }) => {
 						onClick={() => navigate('/app/dashboard')}
 						className="text-sm font-semibold tracking-tight whitespace-nowrap hover:opacity-80"
 					>
-						Aether Video
+						FlowVerse
 					</button>
 				</div>
 

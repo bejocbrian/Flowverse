@@ -260,7 +260,7 @@ const LibraryPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Library - Aether Video</title>
+				<title>Library - FlowVerse</title>
 			</Helmet>
 
 			<div className="flex-1 overflow-y-auto bg-black text-white">

@@ -2,7 +2,6 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
-import ChatWidget from './ChatWidget.jsx';
 
 const MainLayout = ({ children }) => {
   return (
@@ -18,7 +17,6 @@ const MainLayout = ({ children }) => {
         {children}
       </motion.main>
       <Footer />
-      <ChatWidget />
     </div>
   );
 };

@@ -162,7 +162,7 @@ const DashboardPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Dashboard - Aether Video</title>
+				<title>Dashboard - FlowVerse</title>
 			</Helmet>
 
 			<div className="flex-1 overflow-y-auto bg-black text-white">

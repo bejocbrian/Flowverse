@@ -155,7 +155,7 @@ const WalletPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Wallet - Aether Video</title>
+				<title>Wallet - FlowVerse</title>
 			</Helmet>
 
 			<div className="flex-1 overflow-y-auto bg-black text-white">

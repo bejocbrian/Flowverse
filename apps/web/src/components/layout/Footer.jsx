@@ -9,7 +9,7 @@ const Footer = () => {
       <Container>
         <div className="flex flex-col md:flex-row justify-between items-center md:items-start gap-8 mb-12">
           <Link to={ROUTES.HOME} className="text-2xl font-heading font-extrabold tracking-tight">
-            Localayer AI
+            FlowVerse
           </Link>
           
           <nav className="flex flex-wrap justify-center gap-6">
@@ -21,7 +21,7 @@ const Footer = () => {
         </div>
 
         <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-white/50">
-          <p>© 2025 Localayer AI. All rights reserved. · In business since 2018.</p>
+          <p>© 2025 FlowVerse. All rights reserved. · In business since 2018.</p>
           <div className="flex gap-6">
             <span className="hover:text-white cursor-pointer transition-colors">Privacy Policy</span>
             <span className="hover:text-white cursor-pointer transition-colors">Terms of Service</span>

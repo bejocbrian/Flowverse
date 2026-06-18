@@ -993,7 +993,7 @@ const GeneratePage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Workspace - Aether Video</title>
+				<title>Workspace - FlowVerse</title>
 			</Helmet>
 
 			<div className="flex-1 relative bg-black flex flex-col overflow-hidden">

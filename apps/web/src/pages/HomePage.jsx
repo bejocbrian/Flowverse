@@ -257,7 +257,7 @@ const Hero = () => {
 							in seconds.
 						</h1>
 						<p className="text-lg md:text-xl text-[hsl(var(--text-secondary))] mb-8 max-w-xl leading-relaxed">
-							Aether Video runs the latest frontier models on a fast queue. Type a shot,
+							FlowVerse runs the latest frontier models on a fast queue. Type a shot,
 							pick a model, ship to your timeline.
 						</p>
 
@@ -434,7 +434,7 @@ const Showcase = () => (
 			<SectionHeader
 				eyebrow="GALLERY"
 				title="See what's possible"
-				sub="Real frames generated on Aether Video. Hover for the prompt that produced each one."
+				sub="Real frames generated on FlowVerse. Hover for the prompt that produced each one."
 			/>
 
 			<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4 auto-rows-[180px] md:auto-rows-[200px]">
@@ -852,7 +852,7 @@ const Footer = () => (
 	<footer className="border-t border-[hsl(var(--border-subtle))] py-10 px-4 sm:px-6 lg:px-8 mt-12">
 		<div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
 			<div className="flex items-center gap-2">
-				<span className="font-semibold tracking-tight">Aether Video</span>
+				<span className="font-semibold tracking-tight">FlowVerse</span>
 				<span className="text-xs text-[hsl(var(--text-muted))] font-mono ml-2">
 					&copy; {new Date().getFullYear()}
 				</span>
@@ -892,7 +892,7 @@ const HomePage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Aether Video - Turn ideas into cinematic video</title>
+				<title>FlowVerse - Turn ideas into cinematic video</title>
 				<meta
 					name="description"
 					content="Generate cinematic video from a prompt. A growing roster of frontier AI models in one workspace, built for working creators."
@@ -909,7 +909,7 @@ const HomePage = () => {
 							<span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] grid place-items-center">
 								<Sparkles className="w-3.5 h-3.5 text-[hsl(var(--canvas))]" />
 							</span>
-							Aether Video
+							FlowVerse
 						</Link>
 						<nav className="hidden md:flex items-center gap-6 text-sm text-[hsl(var(--text-secondary))]">
 							<a

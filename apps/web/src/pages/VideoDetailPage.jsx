@@ -243,7 +243,7 @@ const VideoDetailPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>{`${video.prompt.slice(0, 60)} - Aether Video`}</title>
+				<title>{`${video.prompt.slice(0, 60)} - FlowVerse`}</title>
 				<meta name="description" content={video.prompt} />
 			</Helmet>
 
