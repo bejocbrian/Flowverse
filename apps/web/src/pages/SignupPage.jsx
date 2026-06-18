@@ -51,7 +51,7 @@ const SignupPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Create your account - Aether Video</title>
+				<title>Create your account - FlowVerse</title>
 				<meta name="description" content="Sign up to start generating AI videos" />
 			</Helmet>
 
@@ -63,7 +63,7 @@ const SignupPage = () => {
 							<span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] grid place-items-center">
 								<Sparkles className="w-3.5 h-3.5 text-[hsl(var(--canvas))]" />
 							</span>
-							Aether Video
+							FlowVerse
 						</Link>
 					</div>
 

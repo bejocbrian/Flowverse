@@ -98,7 +98,7 @@ const OnboardingPage = () => {
 	return (
 		<>
 			<Helmet>
-				<title>Welcome - Aether Video</title>
+				<title>Welcome - FlowVerse</title>
 			</Helmet>
 
 			<div className="min-h-screen flex items-center justify-center px-4 py-10 bg-[hsl(var(--canvas))] gradient-hero">
@@ -108,7 +108,7 @@ const OnboardingPage = () => {
 							<span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] grid place-items-center">
 								<Sparkles className="w-3.5 h-3.5 text-[hsl(var(--canvas))]" />
 							</span>
-							Aether Video
+							FlowVerse
 						</div>
 					</div>
 

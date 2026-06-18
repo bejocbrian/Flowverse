@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import healthCheck from './health-check.js';
-import integratedAiRouter from './integrated-ai.js';
 import authRouter from './auth.js';
 import videosRouter from './videos.js';
 import creditsRouter from './credits.js';
@@ -31,13 +30,12 @@ export default () => {
 	const router = Router();
 
 	router.get('/', (_req, res) => {
-		res.json({ name: 'AetherVideo API', status: 'ok' });
+		res.json({ name: 'FlowVerse API', status: 'ok' });
 	});
 
 	router.get('/health', healthCheck);
 
 	router.use('/auth', authRouter);
-	router.use('/integrated-ai', integratedAiRouter);
 	router.use('/models', modelsRouter);
 	router.use('/videos', videosRouter);
 	router.use('/videos', videoSharingRouter);

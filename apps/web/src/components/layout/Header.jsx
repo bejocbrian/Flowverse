@@ -27,7 +27,7 @@ const Header = () => {
       <Container>
         <div className="flex items-center justify-between">
           <Link to={ROUTES.HOME} className="flex-shrink-0 relative z-50">
-            <span className="text-2xl font-heading font-extrabold text-foreground tracking-tight">Localayer AI</span>
+            <span className="text-2xl font-heading font-extrabold text-foreground tracking-tight">FlowVerse</span>
           </Link>
 
           <nav className="hidden lg:flex items-center gap-8">
