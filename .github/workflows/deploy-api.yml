@@ -38,15 +38,15 @@ jobs:
         working-directory: apps/api
         run: npm ci --omit=dev
 
-      - name: Deploy API src via FTP
+      - name: Deploy API via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
-          server: ${{ secrets.FTP_HOST }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: ${{ vars.FTP_PORT || 21 }}
+          server: ${{ secrets.FTP_API_HOST }}
+          username: ${{ secrets.FTP_API_USERNAME }}
+          password: ${{ secrets.FTP_API_PASSWORD }}
+          port: 21
           local-dir: apps/api/
-          server-dir: ${{ vars.FTP_API_REMOTE_DIR || './' }}
+          server-dir: ./
           dangerous-clean-slate: false
           exclude: |
             **/.git*
@@ -63,5 +63,5 @@ jobs:
           echo "  API deploy completed!"
           echo "  ⚠️  MANUAL STEP REQUIRED:"
           echo "  Restart the Node.js app in hPanel:"
-          echo "  hPanel → Websites → Node.js → Restart"
+          echo "  hPanel → Websites → linen-herring-814961 → Node.js → Restart"
           echo "============================================"
