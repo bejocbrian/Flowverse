@@ -22,7 +22,7 @@ jobs:
     name: Build & Deploy Web
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +71,7 @@ jobs:
           local-dir: apps/web/dist/
           server-dir: public_html/
           dangerous-clean-slate: false
+          timeout: 120000
           exclude: |
             **/.git*
             **/.git*/**
