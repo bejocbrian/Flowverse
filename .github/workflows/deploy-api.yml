@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-api-${{ github.ref }}
+  group: deploy-api
   cancel-in-progress: false
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
     name: Deploy API
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -37,15 +38,8 @@ jobs:
         working-directory: apps/api
         run: npm ci --omit=dev
 
-      # Upload src + node_modules via FTP.
-      # Hostinger Business Node.js apps are restarted from hPanel after deploy.
-      # FTP works from GitHub runner IPs; SSH port 65002 is blocked.
-      #
-      # NOTE: After this step finishes, you must manually restart the Node.js
-      # app in hPanel (Websites → <site> → Node.js → Restart) so the new
-      # code takes effect. The old process keeps running until restarted.
       - name: Deploy API src via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
@@ -60,12 +54,14 @@ jobs:
             **/.env
             **/.env.*
             **/npm-debug.log
+            **/.htaccess
 
-      - name: Remind to restart Node.js in hPanel
+      - name: Deploy summary
+        if: success()
         run: |
-          echo "=========================================================="
-          echo "  API files uploaded via FTP."
-          echo "  ACTION REQUIRED: Restart the Node.js app in hPanel."
-          echo "  hPanel → Websites → linen-herring-814961 → Node.js → Restart"
-          echo "  The old process is still running until you restart it."
-          echo "=========================================================="
+          echo "============================================"
+          echo "  API deploy completed!"
+          echo "  ⚠️  MANUAL STEP REQUIRED:"
+          echo "  Restart the Node.js app in hPanel:"
+          echo "  hPanel → Websites → Node.js → Restart"
+          echo "============================================"

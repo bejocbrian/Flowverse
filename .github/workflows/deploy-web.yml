@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-web-${{ github.ref }}
+  group: deploy-web
   cancel-in-progress: false
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
     name: Build & Deploy Web
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -51,12 +52,20 @@ jobs:
           VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: npm run build
 
-      # FTP upload — works on Hostinger shared/Business hosting.
-      # SSH/rsync is blocked from GitHub runner IPs; FTP is not.
-      # Uses SamKirkland/FTP-Deploy-Action which handles incremental sync
-      # (only changed files are uploaded, --delete removes stale files).
-      - name: Deploy via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - name: Verify build output
+        run: |
+          if [ ! -f apps/web/dist/index.html ]; then
+            echo "::error::Build failed - index.html not found in dist/"
+            exit 1
+          fi
+          echo "Build verified. Files in dist/:"
+          ls -la apps/web/dist/
+          echo "---"
+          head -5 apps/web/dist/index.html
+
+      - name: Deploy via FTP (attempt 1)
+        id: deploy
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
@@ -64,9 +73,28 @@ jobs:
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: apps/web/dist/
           server-dir: ${{ vars.FTP_REMOTE_DIR || './' }}
-          # Only upload changed files; delete files removed from dist
           dangerous-clean-slate: false
           exclude: |
             **/.git*
             **/.git*/**
             **/node_modules/**
+
+      - name: Verify deployment
+        run: |
+          echo "Waiting 10s for CDN/server cache to clear..."
+          sleep 10
+          SITE_URL="https://${{ vars.SITE_DOMAIN || 'bisque-hamster-792062.hostingersite.com' }}"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL" || echo "000")
+          echo "Site returned HTTP $HTTP_CODE"
+          if [ "$HTTP_CODE" = "000" ]; then
+            echo "::warning::Could not reach site after deploy - may need a moment to propagate"
+          fi
+
+      - name: Deploy summary
+        if: success()
+        run: |
+          echo "============================================"
+          echo "  Web deploy completed successfully!"
+          echo "  Site: https://${{ vars.SITE_DOMAIN || 'bisque-hamster-792062.hostingersite.com' }}"
+          echo "  Commit: ${{ github.sha }}"
+          echo "============================================"
