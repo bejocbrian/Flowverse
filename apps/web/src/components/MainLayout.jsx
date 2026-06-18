@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
+import { useTheme } from '@/contexts/ThemeContext.jsx';
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -20,6 +21,8 @@ import {
 	Settings,
 	LogOut,
 	User,
+	Moon,
+	Sun,
 } from 'lucide-react';
 
 const navItems = [
@@ -35,6 +38,7 @@ const MainLayout = ({ children }) => {
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { currentUser, logout } = useAuth();
+	const { theme, toggleTheme } = useTheme();
 
 	const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + '/');
 
@@ -60,6 +64,13 @@ const MainLayout = ({ children }) => {
 				<div className="flex-1" />
 
 				<div className="flex items-center gap-2 min-w-[200px] justify-end">
+					<button
+						onClick={toggleTheme}
+						className="p-2 hover:bg-white/10 rounded-full transition-all text-white/60"
+						aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+					>
+						{theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+					</button>
 					<button
 						onClick={() => navigate('/app/wallet')}
 						className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 text-xs font-medium hover:bg-white/5 transition-all"
@@ -143,7 +154,7 @@ const MainLayout = ({ children }) => {
 					})}
 				</nav>
 
-				<main className="flex-1 overflow-auto flex flex-col relative bg-black">{children}</main>
+				<main id="main-content" className="flex-1 overflow-auto flex flex-col relative bg-black">{children}</main>
 			</div>
 		</div>
 	);

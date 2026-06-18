@@ -3,6 +3,7 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext.jsx';
+import { ThemeProvider } from '@/contexts/ThemeContext.jsx';
 import ProtectedRoute from '@/components/ProtectedRoute.jsx';
 import MainLayout from '@/components/MainLayout.jsx';
 import AdminLayout from '@/components/AdminLayout.jsx';
@@ -38,7 +39,14 @@ const AdminSettingsPage = lazy(() => import('@/pages/AdminSettingsPage.jsx'));
 function App() {
   return (
     <Router>
+      <ThemeProvider>
       <AuthProvider>
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-white focus:text-black focus:rounded-lg focus:text-sm focus:font-medium"
+        >
+          Skip to content
+        </a>
         <Suspense fallback={<PageSkeleton />}>
           <Routes>
             {/* Public Routes */}
@@ -251,6 +259,7 @@ function App() {
         </Suspense>
         <Toaster position="bottom-right" />
       </AuthProvider>
+      </ThemeProvider>
     </Router>
   );
 }

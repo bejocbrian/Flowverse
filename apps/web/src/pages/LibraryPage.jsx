@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
 	Play,
 	Search,
@@ -13,6 +13,10 @@ import {
 	XCircle,
 	Image as ImageIcon,
 	AlertTriangle,
+	ChevronLeft,
+	ChevronRight,
+	CheckSquare,
+	Square,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiServerClient from '@/lib/apiServerClient.js';
@@ -46,7 +50,7 @@ const SORT_OPTIONS = [
 /*  Tile                                                                      */
 /* -------------------------------------------------------------------------- */
 
-const VideoTile = ({ video, onDelete }) => {
+const VideoTile = ({ video, onDelete, selected, onToggleSelect, selectionMode }) => {
 	const isImage = video.output_type === 'image';
 	const status = video.status;
 	const completed = status === 'completed' && !!video.video_url;
@@ -86,10 +90,25 @@ const VideoTile = ({ video, onDelete }) => {
 			initial={{ opacity: 0, y: 10 }}
 			animate={{ opacity: 1, y: 0 }}
 			exit={{ opacity: 0, y: -10 }}
-			className="bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden group hover:border-white/20 transition-colors"
+			className={`bg-white/[0.03] border rounded-xl overflow-hidden group transition-colors ${
+				selected ? 'border-[hsl(var(--accent-primary))]/60 bg-[hsl(var(--accent-primary))]/5' : 'border-white/10 hover:border-white/20'
+			}`}
 		>
-			<Link to={`/app/library/${video.id}`} className="block relative">
+			<Link
+				to={selectionMode ? '#' : `/app/library/${video.id}`}
+				onClick={selectionMode ? (e) => { e.preventDefault(); onToggleSelect?.(); } : undefined}
+				className="block relative"
+			>
 				<div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
+					{selectionMode && (
+						<div className="absolute top-2 left-2 z-10">
+							{selected ? (
+								<CheckSquare className="w-5 h-5 text-[hsl(var(--accent-primary))] drop-shadow" />
+							) : (
+								<Square className="w-5 h-5 text-white/60 drop-shadow" />
+							)}
+						</div>
+					)}
 					{completed ? (
 						isImage ? (
 							<img
@@ -212,6 +231,8 @@ const VideoTile = ({ video, onDelete }) => {
 /*  Page                                                                      */
 /* -------------------------------------------------------------------------- */
 
+const ITEMS_PER_PAGE = 12;
+
 const LibraryPage = () => {
 	const [videos, setVideos] = useState([]);
 	const [loading, setLoading] = useState(true);
@@ -219,6 +240,11 @@ const LibraryPage = () => {
 	const [sortBy, setSortBy] = useState('newest');
 	const [search, setSearch] = useState('');
 	const [deleteId, setDeleteId] = useState(null);
+	const [selectedIds, setSelectedIds] = useState(new Set());
+	const [selectionMode, setSelectionMode] = useState(false);
+	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+	const [bulkDeleting, setBulkDeleting] = useState(false);
+	const [page, setPage] = useState(1);
 
 	const fetchVideos = async () => {
 		setLoading(true);
@@ -274,6 +300,47 @@ const LibraryPage = () => {
 		return list;
 	}, [videos, filterType, sortBy, search]);
 
+	const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+	const currentPage = Math.min(page, totalPages);
+	const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+	const toggleSelect = (id) => {
+		setSelectedIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
+
+	const toggleSelectAll = () => {
+		if (selectedIds.size === paginated.length) {
+			setSelectedIds(new Set());
+		} else {
+			setSelectedIds(new Set(paginated.map((v) => v.id)));
+		}
+	};
+
+	const handleBulkDelete = async () => {
+		setBulkDeleting(true);
+		try {
+			await Promise.all(
+				Array.from(selectedIds).map((id) =>
+					pb.collection('videos').delete(id, { $autoCancel: false })
+				)
+			);
+			setVideos((prev) => prev.filter((v) => !selectedIds.has(v.id)));
+			toast.success(`Deleted ${selectedIds.size} video(s)`);
+			setSelectedIds(new Set());
+			setSelectionMode(false);
+		} catch {
+			toast.error('Failed to delete some videos');
+		} finally {
+			setBulkDeleting(false);
+			setBulkDeleteOpen(false);
+		}
+	};
+
 	return (
 		<>
 			<Helmet>
@@ -318,7 +385,7 @@ const LibraryPage = () => {
 							<input
 								type="text"
 								value={search}
-								onChange={(e) => setSearch(e.target.value)}
+								onChange={(e) => { setSearch(e.target.value); setPage(1); }}
 								placeholder="Search prompts…"
 								className="w-full pl-9 pr-3 h-10 rounded-full bg-white/[0.03] border border-white/10 text-sm placeholder:text-white/30 focus:bg-white/[0.05] focus:border-white/20 outline-none transition-colors"
 							/>
@@ -329,7 +396,7 @@ const LibraryPage = () => {
 								{FILTER_OPTIONS.map((f) => (
 									<button
 										key={f.key}
-										onClick={() => setFilterType(f.key)}
+										onClick={() => { setFilterType(f.key); setPage(1); }}
 										className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
 											filterType === f.key
 												? 'bg-white text-black'
@@ -355,8 +422,54 @@ const LibraryPage = () => {
 									</button>
 								))}
 							</div>
+							{filtered.length > 0 && (
+								<button
+									onClick={() => {
+										setSelectionMode((v) => !v);
+										if (selectionMode) setSelectedIds(new Set());
+									}}
+									className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+										selectionMode
+											? 'bg-[hsl(var(--accent-primary))]/15 border-[hsl(var(--accent-primary))]/40 text-[hsl(var(--accent-primary))]'
+											: 'border-white/10 text-white/60 hover:text-white'
+									}`}
+								>
+									{selectionMode ? 'Cancel' : 'Select'}
+								</button>
+							)}
 						</div>
 					</div>
+
+					{/* Bulk action bar */}
+					<AnimatePresence>
+						{selectionMode && selectedIds.size > 0 && (
+							<motion.div
+								initial={{ opacity: 0, y: -8 }}
+								animate={{ opacity: 1, y: 0 }}
+								exit={{ opacity: 0, y: -8 }}
+								className="flex items-center justify-between mb-4 px-4 py-2.5 rounded-xl bg-[hsl(var(--accent-primary))]/10 border border-[hsl(var(--accent-primary))]/30"
+							>
+								<div className="flex items-center gap-3">
+									<button
+										onClick={toggleSelectAll}
+										className="text-xs font-medium text-[hsl(var(--accent-primary))] hover:underline"
+									>
+										{selectedIds.size === paginated.length ? 'Deselect all' : 'Select all'}
+									</button>
+									<span className="text-xs text-white/50">
+										{selectedIds.size} selected
+									</span>
+								</div>
+								<button
+									onClick={() => setBulkDeleteOpen(true)}
+									className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-medium hover:bg-red-500/25 transition-colors"
+								>
+									<Trash2 className="w-3.5 h-3.5" />
+									Delete ({selectedIds.size})
+								</button>
+							</motion.div>
+						)}
+					</AnimatePresence>
 
 					{/* Grid */}
 					{loading ? (
@@ -394,11 +507,69 @@ const LibraryPage = () => {
 							</Link>
 						</div>
 					) : (
-						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-							{filtered.map((v) => (
-								<VideoTile key={v.id} video={v} onDelete={handleDelete} />
-							))}
-						</div>
+						<>
+							<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+								{paginated.map((v) => (
+									<VideoTile
+										key={v.id}
+										video={v}
+										onDelete={handleDelete}
+										selected={selectedIds.has(v.id)}
+										onToggleSelect={() => toggleSelect(v.id)}
+										selectionMode={selectionMode}
+									/>
+								))}
+							</div>
+
+							{/* Pagination */}
+							{totalPages > 1 && (
+								<div className="flex items-center justify-center gap-2 mt-8">
+									<button
+										onClick={() => setPage((p) => Math.max(1, p - 1))}
+										disabled={currentPage <= 1}
+										className="p-2 rounded-lg border border-white/10 text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+										aria-label="Previous page"
+									>
+										<ChevronLeft className="w-4 h-4" />
+									</button>
+									{Array.from({ length: totalPages }, (_, i) => i + 1)
+										.filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+										.reduce((acc, p, i, arr) => {
+											if (i > 0 && p - arr[i - 1] > 1) acc.push('...');
+											acc.push(p);
+											return acc;
+										}, [])
+										.map((p, i) =>
+											p === '...' ? (
+												<span key={`ellipsis-${i}`} className="px-1 text-white/30">…</span>
+											) : (
+												<button
+													key={p}
+													onClick={() => setPage(p)}
+													className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
+														currentPage === p
+															? 'bg-white text-black'
+															: 'text-white/60 hover:text-white hover:bg-white/5'
+													}`}
+												>
+													{p}
+												</button>
+											)
+										)}
+									<button
+										onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+										disabled={currentPage >= totalPages}
+										className="p-2 rounded-lg border border-white/10 text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+										aria-label="Next page"
+									>
+										<ChevronRight className="w-4 h-4" />
+									</button>
+								</div>
+							)}
+							<p className="text-center text-[11px] text-white/30 font-mono mt-3">
+								{filtered.length} video(s) · Page {currentPage} of {totalPages}
+							</p>
+						</>
 					)}
 				</div>
 			</div>
@@ -416,6 +587,25 @@ const LibraryPage = () => {
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction onClick={confirmDelete} className="bg-red-500 hover:bg-red-600">
 							Delete
+						</AlertDialogAction>
+					</div>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog open={bulkDeleteOpen} onOpenChange={(open) => !open && setBulkDeleteOpen(false)}>
+				<AlertDialogContent className="bg-[hsl(var(--surface))] border-[hsl(var(--border))]">
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete {selectedIds.size} video(s)</AlertDialogTitle>
+						<AlertDialogDescription>
+							This action cannot be undone. All selected videos will be permanently removed from
+							your library.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="flex justify-end gap-2">
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={handleBulkDelete} className="bg-red-500 hover:bg-red-600">
+							{bulkDeleting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
+							Delete all
 						</AlertDialogAction>
 					</div>
 				</AlertDialogContent>

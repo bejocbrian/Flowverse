@@ -12,9 +12,12 @@ import {
 	Mail,
 	Sparkles,
 	User as UserIcon,
+	Moon,
+	Sun,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext.jsx';
+import { useTheme } from '@/contexts/ThemeContext.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
 import { Toggle } from '@/components/ui/toggle.jsx';
 
@@ -46,6 +49,7 @@ const SectionHeader = ({ icon: Icon, title, sub }) => (
 
 const SettingsPage = () => {
 	const { currentUser, refreshUser, logout } = useAuth();
+	const { theme, toggleTheme } = useTheme();
 
 	const [name, setName] = useState(currentUser?.name || '');
 	const [savingProfile, setSavingProfile] = useState(false);
@@ -211,6 +215,20 @@ const SettingsPage = () => {
 								</p>
 							</div>
 							<Toggle checked={notifEnabled} onChange={handleToggleNotif} disabled={savingNotif} />
+						</div>
+					</Card>
+
+					{/* Appearance */}
+					<Card>
+						<SectionHeader icon={theme === 'dark' ? Moon : Sun} title="Appearance" sub="Switch between dark and light mode." />
+						<div className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-white/5">
+							<div>
+								<p className="text-sm font-medium">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</p>
+								<p className="text-xs text-white/40 mt-0.5">
+									{theme === 'dark' ? 'Easier on the eyes at night.' : 'Better visibility in bright environments.'}
+								</p>
+							</div>
+							<Toggle checked={theme === 'light'} onChange={toggleTheme} />
 						</div>
 					</Card>
 

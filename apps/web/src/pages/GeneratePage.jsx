@@ -645,7 +645,7 @@ const GeneratePage = () => {
 	/* ---------------------------- polling -------------------------------- */
 
 	const stopPolling = useCallback(() => {
-		if (pollingRef.current) clearInterval(pollingRef.current);
+		if (pollingRef.current) clearTimeout(pollingRef.current);
 		if (progressRef.current) clearInterval(progressRef.current);
 		pollingRef.current = null;
 		progressRef.current = null;
@@ -656,7 +656,9 @@ const GeneratePage = () => {
 	const startPolling = useCallback(
 		(videoId) => {
 			stopPolling();
-			pollingRef.current = setInterval(async () => {
+			let attempt = 0;
+			const poll = async () => {
+				attempt++;
 				try {
 					const res = await apiServerClient.fetch(`/videos/${videoId}/status`);
 					if (!res.ok) return;
@@ -680,6 +682,7 @@ const GeneratePage = () => {
 						setLoading(false);
 						refreshUser();
 						toast.success('Generation complete');
+						return;
 					} else if (data.status === 'failed') {
 						stopPolling();
 						setLoading(false);
@@ -687,11 +690,16 @@ const GeneratePage = () => {
 						setStage(0);
 						refreshUser();
 						toast.error(data.error_message || 'Generation failed');
+						return;
 					}
-				} catch (err) {
-					// transient network errors are fine - keep polling
+				} catch {
+					// transient network errors — keep polling
 				}
-			}, 5000);
+				// Exponential backoff: 5s, 5s, 8s, 12s, 15s cap
+				const delay = Math.min(5000 + attempt * 1500, 15000);
+				pollingRef.current = setTimeout(poll, delay);
+			};
+			pollingRef.current = setTimeout(poll, 5000);
 		},
 		[refreshUser, stopPolling]
 	);
@@ -1150,10 +1158,10 @@ const GeneratePage = () => {
 							</motion.div>
 						)}
 
-						{/* Loading state with stages */}
-						{loading && (
-							<div className="w-full max-w-xl mt-16 sm:mt-24">
-								<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-8 flex flex-col items-center text-center">
+					{/* Loading state with stages */}
+					{loading && (
+						<div className="w-full max-w-xl mt-16 sm:mt-24" aria-live="polite" aria-atomic="true">
+							<div className="bg-white/[0.03] border border-white/10 rounded-2xl p-8 flex flex-col items-center text-center">
 									{/* Animated ring */}
 									<div className="relative w-16 h-16 mb-6">
 										<svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">

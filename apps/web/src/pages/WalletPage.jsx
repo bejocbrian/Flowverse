@@ -178,6 +178,9 @@ const WalletPage = () => {
 								<span className="text-5xl font-semibold tracking-tight">{balance}</span>
 								<span className="text-sm text-white/40">credits</span>
 							</div>
+							{balance < 10 && balance > 0 && (
+								<p className="text-xs text-amber-300 mt-2">Low on credits — consider topping up.</p>
+							)}
 							<button
 								onClick={() => setTab('buy')}
 								className="mt-5 inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--accent-primary))] hover:underline"
