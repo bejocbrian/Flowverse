@@ -59,12 +59,13 @@ Go to **GitHub → your repo → Settings → Secrets and variables → Actions*
 | `FTP_PORT` | `21` | FTP port (Hostinger uses 21) |
 | `FTP_REMOTE_DIR` | `./` | Remote dir for the **web** static files (document root of the frontend site) |
 | `FTP_API_REMOTE_DIR` | `./api/` | Remote dir for the **API** files on the Node.js app |
+| `SITE_DOMAIN` | `bisque-hamster-792062.hostingersite.com` | Your site domain for verification |
 
 > If the defaults are wrong for your Hostinger directory layout, set these as Variables (not Secrets).
 
 ---
 
-## ⚠️ The One Manual Step After API Deploy
+## The One Manual Step After API Deploy
 
 Hostinger's Node.js hosting does **not** auto-restart the process when files change via FTP. After `deploy-api.yml` completes:
 
@@ -92,8 +93,8 @@ CORS_ORIGIN=https://bisque-hamster-792062.hostingersite.com
 POCKETBASE_URL=<your pocketbase url>
 PB_SUPERUSER_EMAIL=<admin email>
 PB_SUPERUSER_PASSWORD=<admin password>
-INTEGRATED_AI_API_URL=https://api.geminigen.ai/uapi/v1
-INTEGRATED_AI_API_KEY=<your key>
+GEMINIGEN_API_URL=https://api.geminigen.ai/uapi/v1
+GEMINIGEN_API_KEY=<your key>
 WEBSITE_ID=<your id>
 WEBSITE_DOMAIN=bisque-hamster-792062.hostingersite.com
 CASHFREE_APP_ID=<your id>
@@ -126,7 +127,9 @@ Merge PR into main
       │       1. Checkout code
       │       2. npm ci (root + web)
       │       3. vite build (uses VITE_* secrets)
-      │       4. FTP upload apps/web/dist/ → Hostinger static site
+      │       4. Verify build output (index.html exists)
+      │       5. FTP upload apps/web/dist/ → Hostinger static site
+      │       6. Verify deployment (HTTP check)
       │       ✓ Live immediately (Apache serves new files)
       │
       └──► deploy-api.yml (if api/ changed)
@@ -169,13 +172,16 @@ Merge PR into main
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| Frontend shows old version after merge | Browser cache | Hard refresh (Ctrl+Shift+R). The `.htaccess` sets `no-cache` on `index.html` so this shouldn't persist |
-| API returns old responses after merge | Node.js process not restarted | Restart in hPanel → Node.js |
-| Deploy workflow fails at FTP step | Wrong FTP credentials | Check `FTP_HOST`, `FTP_USERNAME`, `FTP_PASSWORD` secrets in GitHub |
+| Frontend shows old version after merge | Browser cache or `.htaccess` not deployed | Hard refresh (Ctrl+Shift+R). Verify `.htaccess` is in `apps/web/public/` |
+| Deploy workflow fails at FTP step | Wrong FTP credentials or FTP blocked | Check `FTP_HOST`, `FTP_USERNAME`, `FTP_PASSWORD` secrets. Verify FTP works from another client |
+| Build succeeds but deploy fails | FTP connection timeout or Hostinger rate limit | Re-run the workflow. Check Hostinger FTP status |
 | Web build fails in CI | Missing secret `VITE_API_URL` | Add the secret in GitHub Settings |
+| API returns old responses after merge | Node.js process not restarted | Restart in hPanel → Node.js |
 | API crashes on startup | Bad env var or missing `.env` in hPanel | Check hPanel → Node.js → Environment Variables and compare to `.env.example` |
 | CORS errors in browser | `CORS_ORIGIN` env var not matching frontend URL | Update `CORS_ORIGIN` in hPanel to exactly match the frontend domain |
 | Payment webhooks not received | Webhook URL not updated | Update `CASHFREE_WEBHOOK_URL` (and equivalent for other gateways) in hPanel to point to the API URL |
+| FTP deploy fails with "connection refused" | Hostinger FTP server temporarily down | Wait 5 min and re-run. Check Hostinger status page |
+| FTP deploy fails with "530 Login incorrect" | FTP password rotated or account locked | Reset FTP password in hPanel and update GitHub secret |
 
 ---
 
@@ -223,4 +229,58 @@ horizons-export-…/
 │       └── codeql.yml      ← Weekly security scan
 ├── DEPLOYMENT.md      ← This file
 └── STARTUP_INSTRUCTIONS.md  ← Local development setup
+```
+
+---
+
+## Workflow Details
+
+### deploy-web.yml
+
+- **Trigger:** Push to `main` with changes in `apps/web/**`
+- **Steps:** Install deps → Vite build → Verify build output → FTP upload → HTTP verification
+- **Action version:** `SamKirkland/FTP-Deploy-Action@v4.4.0`
+- **Build output:** `apps/web/dist/` (includes `index.html`, hashed JS/CSS bundles, `.htaccess`)
+- **Cache strategy:** `.htaccess` sets `no-cache` on `index.html`, `immutable` on hashed assets
+- **Post-deploy:** Automatic HTTP check to verify site is reachable
+
+### deploy-api.yml
+
+- **Trigger:** Push to `main` with changes in `apps/api/**`
+- **Steps:** Install prod deps → FTP upload → Reminder to restart
+- **Action version:** `SamKirkland/FTP-Deploy-Action@v4.4.0`
+- **Deployed files:** `apps/api/` (src + node_modules, excludes `.env`)
+- **Post-deploy:** ⚠️ Manual restart required in hPanel
+
+### ci.yml
+
+- **Trigger:** Push to `main` or PR against `main`
+- **Steps:** Lockfile sync → Lint API (if changed) → Lint + Build web (if changed)
+- **Does NOT deploy** — only validates code quality
+- **Concurrency:** Cancels previous in-progress runs for same ref
+
+---
+
+## FTP Connection Notes
+
+- Hostinger shared hosting **blocks SSH from external IPs** — FTP is the only viable option from GitHub Actions runners
+- FTP port is typically **21** (standard FTP, not SFTP)
+- The FTP action uses incremental sync — only changed files are uploaded
+- `dangerous-clean-slate: false` preserves files not in the build output (e.g., `.htaccess` if not in `public/`)
+- If FTP credentials expire, update them in hPanel and re-set the GitHub secrets
+
+---
+
+## PocketBase Retention Cron
+
+The project includes a PocketBase hook (`apps/pocketbase/pb_hooks/video-retention.pb.js`) that runs a daily cleanup of videos older than 30 days. This prevents storage bloat on PocketBase.
+
+- **Endpoint:** `GET /cron/video-retention`
+- **Retention period:** 30 days (configurable via `VIDEO_RETENTION_DAYS` env var)
+- **Scope:** Internal only (localhost/127.0.0.1)
+- **What it does:** Deletes old video records and their associated files (video_url, thumbnail_url)
+
+To trigger manually:
+```bash
+curl http://localhost:8090/cron/video-retention
 ```
