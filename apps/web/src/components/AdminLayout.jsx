@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.jsx';
-import { LayoutDashboard, Users, Settings, Server, ExternalLink, Menu, User, LogOut, X, Box } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, Server, ExternalLink, Menu, User, LogOut, X } from 'lucide-react';
 import pb from '@/lib/pocketbaseClient.js';
 
 const AdminLayout = ({ children }) => {
@@ -15,7 +15,6 @@ const AdminLayout = ({ children }) => {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-    { name: 'Models', path: '/admin/models', icon: Box },
     { name: 'Providers', path: '/admin/providers', icon: Server },
     { name: 'Users', path: '/admin/users', icon: Users },
     { name: 'Settings', path: '/admin/settings', icon: Settings },

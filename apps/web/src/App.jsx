@@ -33,7 +33,6 @@ const QueuePage = lazy(() => import('@/pages/QueuePage.jsx'));
 // Admin Pages
 import AdminDashboard from '@/pages/AdminDashboard.jsx';
 import AdminProvidersPage from '@/pages/AdminProvidersPage.jsx';
-import AdminModelsPage from '@/pages/AdminModelsPage.jsx';
 import AdminUsersPage from '@/pages/AdminUsersPage.jsx';
 import AdminSettingsPage from '@/pages/AdminSettingsPage.jsx';
 
@@ -208,16 +207,6 @@ function App() {
               <ProtectedRoute requiredRole="admin">
                 <AdminLayout>
                   <AdminProvidersPage />
-                </AdminLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/models"
-            element={
-              <ProtectedRoute requiredRole="admin">
-                <AdminLayout>
-                  <AdminModelsPage />
                 </AdminLayout>
               </ProtectedRoute>
             }
