@@ -31,6 +31,7 @@ import { createHash, createVerify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
+import { refundCredits } from '../utils/dbTransaction.js';
 
 const router = Router();
 
@@ -130,28 +131,6 @@ function pickThumbnailUrl(data) {
 	return data?.thumbnail_url || data?.thumb_url || '';
 }
 
-async function refundCredits(video, reason) {
-	try {
-		const user = await pb.collection('users').getOne(video.user_id);
-		const refund = video.credit_cost || 0;
-		const newBalance = (user.credits_balance || 0) + refund;
-		await pb.collection('users').update(video.user_id, {
-			credits_balance: newBalance,
-		});
-		await pb.collection('transactions').create({
-			user_id: video.user_id,
-			type: 'refund',
-			amount: refund,
-			balance_after: newBalance,
-			description: reason,
-			video_id: video.id,
-		});
-		logger.info(`Credits refunded (${refund}) for video ${video.id}`);
-	} catch (refundError) {
-		logger.error('Credit refund error:', refundError.message);
-	}
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Video handlers                                                            */
 /* -------------------------------------------------------------------------- */
@@ -195,7 +174,7 @@ async function handleVideoFailed(data, uuid) {
 		webhook_data: JSON.stringify(data),
 	});
 
-	await refundCredits(video, 'Refund: Video generation failed');
+	await refundCredits(pb, video.user_id, video.credit_cost || 0, 'Refund: Video generation failed', video.id);
 	logger.info(`Video failed: ${video.id}`);
 }
 
@@ -243,7 +222,7 @@ async function handleImageFailed(data, uuid) {
 		webhook_data: JSON.stringify(data),
 	});
 
-	await refundCredits(record, 'Refund: Image generation failed');
+	await refundCredits(pb, record.user_id, record.credit_cost || 0, 'Refund: Image generation failed', record.id);
 	logger.info(`Image failed: ${record.id}`);
 }
 

@@ -17,6 +17,7 @@
  */
 
 import { loadCatalog, getVariantByKey as dbGetVariantByKey, variantResolutions as dbVariantResolutions } from './modelCatalog.js';
+import { chainedClipCount } from '../constants/models.js';
 
 export const DEFAULT_DURATION = 8;
 

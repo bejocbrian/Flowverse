@@ -8,6 +8,48 @@ import logger from './logger.js';
  * compensation-based rollback.
  */
 
+/* -------------------------------------------------------------------------- */
+/*  Per-user mutex (prevents race conditions on concurrent credit operations) */
+/* -------------------------------------------------------------------------- */
+
+const userLocks = new Map();
+
+/**
+ * Acquire a per-user mutex lock. Only one operation per userId can run at a time.
+ * Automatically releases after 30 seconds to prevent deadlocks.
+ * 
+ * @param {string} userId
+ * @param {Function} fn - Async function to execute while holding the lock
+ * @returns {Promise<any>} - Result of fn
+ */
+export async function withUserLock(userId, fn) {
+	// Wait for any existing lock on this user
+	while (userLocks.get(userId)) {
+		await new Promise(resolve => setTimeout(resolve, 50));
+	}
+
+	// Acquire lock
+	const lockSymbol = Symbol('lock');
+	userLocks.set(userId, lockSymbol);
+
+	// Auto-release after 30s to prevent deadlock
+	const timeout = setTimeout(() => {
+		if (userLocks.get(userId) === lockSymbol) {
+			logger.warn(`Auto-releasing stale lock for user ${userId}`);
+			userLocks.delete(userId);
+		}
+	}, 30000);
+
+	try {
+		return await fn();
+	} finally {
+		clearTimeout(timeout);
+		if (userLocks.get(userId) === lockSymbol) {
+			userLocks.delete(userId);
+		}
+	}
+}
+
 /**
  * Execute a series of database operations with automatic rollback on failure.
  * 
@@ -156,16 +198,36 @@ export async function deductCredits(pb, userId, amount) {
 /**
  * Refund credits (used by rollback or failure handlers)
  * 
+ * Idempotent: if a refund transaction already exists for the given videoId,
+ * this is a no-op (prevents triple refunds from webhook + processor + browser poll).
+ *
  * @param {Object} pb - PocketBase client
  * @param {string} userId - User ID
  * @param {number} amount - Amount to refund
  * @param {string} reason - Reason for refund
  * @param {string} videoId - Related video ID (optional)
- * @returns {Promise<{success: boolean, newBalance: number}>}
+ * @returns {Promise<{success: boolean, newBalance: number, alreadyRefunded?: boolean}>}
  */
 export async function refundCredits(pb, userId, amount, reason, videoId = null) {
+	// Idempotency check: skip if we already refunded for this video
+	if (videoId) {
+		try {
+			const existing = await pb.collection('transactions').getList(1, 1, {
+				filter: `user_id = "${userId}" && type = "refund" && video_id = "${videoId}"`,
+			});
+			if (existing.totalItems > 0) {
+				const user = await pb.collection('users').getOne(userId);
+				logger.info(`Refund already exists for video ${videoId}, skipping`);
+				return { success: true, newBalance: user.credits_balance, alreadyRefunded: true };
+			}
+		} catch (checkError) {
+			logger.warn('Refund idempotency check failed, proceeding with refund:', checkError.message);
+		}
+	}
+
 	const user = await pb.collection('users').getOne(userId);
-	const newBalance = user.credits_balance + amount;
+	const currentBalance = user.credits_balance ?? 0;
+	const newBalance = currentBalance + amount;
 
 	await pb.collection('users').update(userId, {
 		credits_balance: newBalance,
@@ -180,6 +242,8 @@ export async function refundCredits(pb, userId, amount, reason, videoId = null) 
 		description: reason,
 		...(videoId && { video_id: videoId }),
 	});
+
+	logger.info(`Credits refunded (${amount}) for user ${userId}, video ${videoId || 'n/a'}`);
 
 	return {
 		success: true,

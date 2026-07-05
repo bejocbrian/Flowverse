@@ -4,13 +4,13 @@ import { readFile } from 'node:fs/promises';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
-import { generateVideo, generateImage, extendVideo, getExtendProvider, SnapgenStatus } from '../api/snapgen.js';
+import { generateVideo, generateImage, extendVideo, getExtendProvider, getGenerationStatus, SnapgenStatus } from '../api/snapgen.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
 import { getEnabledModels } from '../utils/modelCatalog.js';
 import { isPaidUser } from '../utils/userTier.js';
-import { refundCredits } from '../utils/dbTransaction.js';
+import { refundCredits, withUserLock } from '../utils/dbTransaction.js';
 import { createTempDir, cleanupTempDir, downloadAndMerge } from '../utils/videoMerger.js';
 import { POLLING_CONFIG } from '../workers/generationProcessor.js';
 
@@ -100,85 +100,89 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 			}
 		}
 
-		const generationIds = [];
+		// Wrap credit deduction in per-user lock to prevent race conditions
+		const generationIds = await withUserLock(req.pocketbaseUserId, async () => {
+			// Re-read balance under lock
+			const lockedUser = await pb.collection('users').getOne(req.pocketbaseUserId);
 
-		for (let i = 0; i < variationCount; i++) {
-			let aspectRatio = video.aspect_ratio;
-			let duration = video.duration;
-			let quality = video.quality;
+			const ids = [];
+			for (let i = 0; i < variationCount; i++) {
+				let aspectRatio = video.aspect_ratio;
+				let duration = video.duration;
+				let quality = video.quality;
 
-			if (!sameSettings) {
-				if (varyAspectRatio) aspectRatio = varyAspectRatio;
-				if (varyDuration) duration = varyDuration;
-				if (varyQuality) quality = varyQuality;
-			}
-
-			const creditCost = await (async () => {
-				// Resolve the catalog variant from the original video's vendor
-				// id + resolution, then price via the single shared calculator.
-				const enabled = await getEnabledModels();
-				const variant =
-					enabled.find((m) => m.id === video.model && (m.credits?.[quality] != null || m.creditsPerSecond?.[quality] != null)) ||
-					enabled.find((m) => m.id === video.model) ||
-					null;
-				if (!variant) {
-					throw new Error('Unknown or unavailable model for regeneration');
+				if (!sameSettings) {
+					if (varyAspectRatio) aspectRatio = varyAspectRatio;
+					if (varyDuration) duration = varyDuration;
+					if (varyQuality) quality = varyQuality;
 				}
-				return computeCreditCost({ modelKey: variant.key, resolution: quality, duration });
-			})();
 
-			if (user.credits_balance < creditCost) {
-				return res.status(400).json({ error: 'Insufficient credits for all variations' });
+				const creditCost = await (async () => {
+					const enabled = await getEnabledModels();
+					const variant =
+						enabled.find((m) => m.id === video.model && (m.credits?.[quality] != null || m.creditsPerSecond?.[quality] != null)) ||
+						enabled.find((m) => m.id === video.model) ||
+						null;
+					if (!variant) {
+						throw new Error('Unknown or unavailable model for regeneration');
+					}
+					return computeCreditCost({ modelKey: variant.key, resolution: quality, duration });
+				})();
+
+				if (lockedUser.credits_balance < creditCost) {
+					throw new Error('Insufficient credits for all variations');
+				}
+
+				// Create new video generation request
+				const newVideo = await pb.collection('videos').create({
+					user_id: req.pocketbaseUserId,
+					prompt: (newPrompt && typeof newPrompt === 'string' && newPrompt.trim().length >= 3)
+						? newPrompt.trim()
+						: video.prompt,
+					negative_prompt: video.negative_prompt,
+					status: 'queued',
+					aspect_ratio: aspectRatio,
+					duration,
+					quality,
+					provider: video.provider,
+					model: video.model,
+					output_type: video.output_type || 'video',
+					credit_cost: creditCost,
+					parent_video_id: id,
+					share_token: randomBytes(16).toString('hex'),
+					...(idempotency_key && { idempotency_key }),
+				});
+
+				ids.push(newVideo.id);
+
+				// Deduct credits
+				const newBalance = lockedUser.credits_balance - creditCost;
+				await pb.collection('users').update(req.pocketbaseUserId, {
+					credits_balance: newBalance,
+				});
+
+				lockedUser.credits_balance = newBalance;
+
+				// Create transaction
+				await pb.collection('transactions').create({
+					user_id: req.pocketbaseUserId,
+					type: 'generation',
+					amount: creditCost,
+					balance_after: newBalance,
+					description: `Regeneration variation ${i + 1}: ${video.prompt.substring(0, 40)}...`,
+					video_id: newVideo.id,
+				});
+
+				// Submit to SnapGen API asynchronously
+				submitToSnapGen(newVideo, isImage).catch(error => {
+					logger.error(`SnapGen regen submission failed for ${newVideo.id}:`, error.message);
+				});
 			}
 
-			// Create new video generation request
-			const newVideo = await pb.collection('videos').create({
-				user_id: req.pocketbaseUserId,
-				// Use the caller's refined prompt if provided, else reuse the original.
-				prompt: (newPrompt && typeof newPrompt === 'string' && newPrompt.trim().length >= 3)
-					? newPrompt.trim()
-					: video.prompt,
-				negative_prompt: video.negative_prompt,
-				status: 'queued',
-				aspect_ratio: aspectRatio,
-				duration,
-				quality,
-				provider: video.provider,
-				model: video.model,
-				output_type: video.output_type || 'video',
-				credit_cost: creditCost,
-				parent_video_id: id,
-				share_token: randomBytes(16).toString('hex'),
-				...(idempotency_key && { idempotency_key }),
-			});
+			return ids;
+		});
 
-			generationIds.push(newVideo.id);
-
-			// Deduct credits
-			const newBalance = user.credits_balance - creditCost;
-			await pb.collection('users').update(req.pocketbaseUserId, {
-				credits_balance: newBalance,
-			});
-
-			user.credits_balance = newBalance;
-
-			// Create transaction
-			await pb.collection('transactions').create({
-				user_id: req.pocketbaseUserId,
-				type: 'generation',
-				amount: creditCost,
-				balance_after: newBalance,
-				description: `Regeneration variation ${i + 1}: ${video.prompt.substring(0, 40)}...`,
-				video_id: newVideo.id,
-			});
-
-			// Submit to SnapGen API asynchronously
-			submitToSnapGen(newVideo, isImage).catch(error => {
-				logger.error(`SnapGen regen submission failed for ${newVideo.id}:`, error.message);
-			});
-		}
-
-		logger.info(`Video regenerated: ${id}, variations: ${variationCount}`);
+		logger.info(`Video regenerated: ${id}, variations: ${generationIds.length}`);
 
 		res.json({
 			generationIds,
@@ -186,6 +190,9 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 		});
 	} catch (error) {
 		logger.error('Regenerate video error:', error.message);
+		if (error.message === 'Insufficient credits for all variations') {
+			return res.status(400).json({ error: error.message });
+		}
 		if (error.message.includes('not found')) {
 			return res.status(404).json({ error: 'Video not found' });
 		}
@@ -321,37 +328,46 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			return res.status(400).json({ error: 'Insufficient credits' });
 		}
 
-		// Create a child video record representing the merged result-in-progress.
-		const newVideo = await pb.collection('videos').create({
-			user_id: req.pocketbaseUserId,
-			prompt: prompt.trim(),
-			negative_prompt: source.negative_prompt || '',
-			status: 'queued',
-			aspect_ratio: source.aspect_ratio,
-			duration: source.duration,
-			quality: source.quality,
-			provider: source.provider,
-			model: source.model,
-			output_type: 'video',
-			credit_cost: creditCost,
-			parent_video_id: id,
-			// Store existing clips so the merge worker knows all clips to concat.
-			clip_urls: JSON.stringify(existingClipUrls),
-			// total_duration tracks cumulative seconds of the merged video.
-			total_duration: (source.total_duration || source.duration || 0),
-			share_token: randomBytes(16).toString('hex'),
-			...(idempotency_key && { idempotency_key }),
-		});
+		// Wrap credit deduction in per-user lock to prevent race conditions
+		const { newVideo } = await withUserLock(req.pocketbaseUserId, async () => {
+			// Re-read balance under lock
+			const lockedUser = await pb.collection('users').getOne(req.pocketbaseUserId);
+			if (lockedUser.credits_balance < creditCost) {
+				throw new Error('Insufficient credits');
+			}
 
-		const newBalance = user.credits_balance - creditCost;
-		await pb.collection('users').update(req.pocketbaseUserId, { credits_balance: newBalance });
-		await pb.collection('transactions').create({
-			user_id: req.pocketbaseUserId,
-			type: 'generation',
-			amount: creditCost,
-			balance_after: newBalance,
-			description: `Extend video: ${prompt.trim().substring(0, 40)}...`,
-			video_id: newVideo.id,
+			// Create a child video record representing the merged result-in-progress.
+			const newVid = await pb.collection('videos').create({
+				user_id: req.pocketbaseUserId,
+				prompt: prompt.trim(),
+				negative_prompt: source.negative_prompt || '',
+				status: 'queued',
+				aspect_ratio: source.aspect_ratio,
+				duration: source.duration,
+				quality: source.quality,
+				provider: source.provider,
+				model: source.model,
+				output_type: 'video',
+				credit_cost: creditCost,
+				parent_video_id: id,
+				clip_urls: JSON.stringify(existingClipUrls),
+				total_duration: (source.total_duration || source.duration || 0),
+				share_token: randomBytes(16).toString('hex'),
+				...(idempotency_key && { idempotency_key }),
+			});
+
+			const newBalance = lockedUser.credits_balance - creditCost;
+			await pb.collection('users').update(req.pocketbaseUserId, { credits_balance: newBalance });
+			await pb.collection('transactions').create({
+				user_id: req.pocketbaseUserId,
+				type: 'generation',
+				amount: creditCost,
+				balance_after: newBalance,
+				description: `Extend video: ${prompt.trim().substring(0, 40)}...`,
+				video_id: newVid.id,
+			});
+
+			return { newVideo: newVid };
 		});
 
 		// Fire-and-forget: generate new clip, merge with existing, update record.
@@ -558,22 +574,9 @@ async function submitToSnapGen(videoRecord, isImage) {
 			error_message: `Submission failed: ${error.message}`,
 		});
 
-		// Refund credits
+		// Refund credits (uses idempotent shared utility)
 		try {
-			const user = await pb.collection('users').getOne(videoRecord.user_id);
-			const newBalance = user.credits_balance + (videoRecord.credit_cost || 0);
-			await pb.collection('users').update(videoRecord.user_id, {
-				credits_balance: newBalance,
-			});
-
-			await pb.collection('transactions').create({
-				user_id: videoRecord.user_id,
-				type: 'refund',
-				amount: videoRecord.credit_cost || 0,
-				balance_after: newBalance,
-				description: `Refund: Regeneration failed`,
-				video_id: videoRecord.id,
-			});
+			await refundCredits(pb, videoRecord.user_id, videoRecord.credit_cost || 0, 'Refund: Regeneration failed', videoRecord.id);
 		} catch (refundError) {
 			logger.error('Regen refund error:', refundError.message);
 		}

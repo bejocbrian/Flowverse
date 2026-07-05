@@ -1,6 +1,6 @@
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
-import { generateVideo, generateImage, getGenerationStatus, SnapgenStatus } from '../api/snapgen.js';
+import { generateVideo, generateImage, extendVideo, getGenerationStatus, SnapgenStatus } from '../api/snapgen.js';
 import { refundCredits } from '../utils/dbTransaction.js';
 import { getVariantByKey, chainedClipCount, chainedClipDuration } from '../constants/models.js';
 import { createTempDir, cleanupTempDir, downloadAndMerge } from '../utils/videoMerger.js';

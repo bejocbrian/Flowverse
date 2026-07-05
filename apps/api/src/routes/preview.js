@@ -5,7 +5,7 @@ import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
 import { getEnabledModels, getVariantByKey } from '../constants/models.js';
-import { withTransaction, refundCredits } from '../utils/dbTransaction.js';
+import { withTransaction, withUserLock, refundCredits } from '../utils/dbTransaction.js';
 import { processGeneration } from '../workers/generationProcessor.js';
 import { sanitizePrompt, sanitizeNegativePrompt, validateResolution, validateAspectRatio } from '../utils/inputSanitizer.js';
 import { VALIDATION } from '../constants/validation.js';
@@ -197,42 +197,40 @@ router.post('/:id/confirm', async (req, res) => {
     
     const remainingCost = fullCost - PREVIEW_COST;
 
-    // Get user balance
-    const user = await pb.collection('users').getOne(req.pocketbaseUserId);
+    // Wrap credit deduction in per-user lock to prevent race conditions
+    await withUserLock(req.pocketbaseUserId, async () => {
+      // Re-read balance under lock
+      const lockedUser = await pb.collection('users').getOne(req.pocketbaseUserId);
 
-    if (user.credits_balance < remainingCost) {
-      return res.status(400).json({ 
-        error: 'Insufficient credits for full generation',
-        required: remainingCost,
-        available: user.credits_balance,
-        preview_credits: PREVIEW_COST,
+      if (lockedUser.credits_balance < remainingCost) {
+        throw new Error('Insufficient credits for full generation');
+      }
+
+      // Update video with full generation settings and charge remaining
+      const newBalance = lockedUser.credits_balance - remainingCost;
+      await pb.collection('users').update(req.pocketbaseUserId, {
+        credits_balance: newBalance,
       });
-    }
 
-    // Update video with full generation settings and charge remaining
-    const newBalance = user.credits_balance - remainingCost;
-    await pb.collection('users').update(req.pocketbaseUserId, {
-      credits_balance: newBalance,
-    });
+      // Update video to full generation
+      await pb.collection('videos').update(id, {
+        status: 'queued',
+        quality: finalQuality,
+        duration: finalDuration,
+        credit_cost: fullCost,
+        is_preview: false,
+        preview_confirmed: true,
+      });
 
-    // Update video to full generation
-    await pb.collection('videos').update(id, {
-      status: 'queued',
-      quality: finalQuality,
-      duration: finalDuration,
-      credit_cost: fullCost,
-      is_preview: false,
-      preview_confirmed: true,
-    });
-
-    // Create transaction for remaining charge
-    await pb.collection('transactions').create({
-      user_id: req.pocketbaseUserId,
-      type: 'generation',
-      amount: remainingCost,
-      balance_after: newBalance,
-      description: `Full generation (after preview): ${video.prompt.substring(0, 30)}...`,
-      video_id: id,
+      // Create transaction for remaining charge
+      await pb.collection('transactions').create({
+        user_id: req.pocketbaseUserId,
+        type: 'generation',
+        amount: remainingCost,
+        balance_after: newBalance,
+        description: `Full generation (after preview): ${video.prompt.substring(0, 30)}...`,
+        video_id: id,
+      });
     });
 
     // Start full generation
@@ -256,6 +254,12 @@ router.post('/:id/confirm', async (req, res) => {
     });
   } catch (error) {
     logger.error('Preview confirmation error:', error.message);
+    if (error.message === 'Insufficient credits for full generation') {
+      return res.status(400).json({ 
+        error: 'Insufficient credits for full generation',
+        code: 'INSUFFICIENT_CREDITS',
+      });
+    }
     if (error.message.includes('not found')) {
       return res.status(404).json({ error: 'Preview not found' });
     }
