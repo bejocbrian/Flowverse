@@ -11,7 +11,7 @@
  * the wallet layer (credit packs), and K only changes the numbers shown to
  * users - it does NOT affect margin (pack ₹ prices are set independently).
  *
- * IMPORTANT: vendor calls (apps/api/src/api/geminigen.js) never send our credit
+ * IMPORTANT: vendor calls (apps/api/src/api/snapgen.js) never send our credit
  * numbers, so scaling the catalog is safe - it only affects what we charge the
  * user and display in the picker.
  *
@@ -31,7 +31,7 @@
  * purely as an upper bound for the (ignored-for-pricing) duration the vendor
  * accepts.
  *
- * `routed: true` means apps/api/src/api/geminigen.js knows how to submit this
+ * `routed: true` means apps/api/src/api/snapgen.js knows how to submit this
  * model to the vendor. Models without routing are kept disabled so they can be
  * priced/reviewed but never charged-then-failed.
  *
@@ -46,7 +46,7 @@
 export const MODEL_VARIANTS = [
 	/* ------------------------------------------------------------------ */
 	/*  PER-VIDEO (flat, duration ignored) — Veo & Grok                    */
-	/*  These have vendor routing in geminigen.js -> enabled.              */
+	/*  These have vendor routing in snapgen.js -> enabled.              */
 	/* ------------------------------------------------------------------ */
 	{
 		key: 'grok-3',
@@ -155,7 +155,7 @@ export const MODEL_VARIANTS = [
 
 	/* ------------------------------------------------------------------ */
 	/*  PER-SECOND (ceil(rate * duration)) — Kling & Seedance              */
-	/*  NO vendor routing yet (geminigen.js) -> disabled until added.      */
+	/*  NO vendor routing yet (snapgen.js) -> disabled until added.      */
 	/* ------------------------------------------------------------------ */
 	{
 		key: 'kling-2.5-relax',

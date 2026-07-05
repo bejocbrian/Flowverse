@@ -4,8 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
 	ArrowLeftRight,
 	ArrowUp,
-	Check,
-	ChevronDown,
 	Coins,
 	Film,
 	ImagePlus,
@@ -27,6 +25,7 @@ import VideoPlayer from '@/components/VideoPlayer.jsx';
 import PreviewConfirmDialog from '@/components/PreviewConfirmDialog.jsx';
 import apiServerClient, { createBatch, createPreview, confirmPreview, cancelPreview, getPreview } from '@/lib/apiServerClient.js';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover.jsx';
+import ModelPicker from '@/components/ModelPicker.jsx';
 
 const ASPECT_RATIOS = [
 	{ id: '16:9', label: '16:9', icon: RectangleHorizontal },
@@ -321,83 +320,15 @@ const SettingsPanel = ({
 				</div>
 			)}
 
-			{/* Model picker (compact, in popover) */}
+			{/* Model picker */}
 			<div className="flex flex-col gap-2">
 				<label className="text-xs uppercase tracking-wider text-white/40 font-mono">Model</label>
-				<Popover>
-					<PopoverTrigger asChild>
-						<button
-							type="button"
-							className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-sm text-white hover:bg-black/60 transition-colors text-left"
-						>
-							<span className="flex flex-col min-w-0">
-								<span className="leading-tight truncate">
-									{selectedModel?.label ?? 'Select model'}
-								</span>
-								{selectedModel?.provider && (
-									<span className="text-[10px] text-white/40 font-mono truncate">
-										{selectedModel.provider}
-									</span>
-								)}
-							</span>
-							<ChevronDown className="w-4 h-4 text-white/50 shrink-0" />
-						</button>
-					</PopoverTrigger>
-					<PopoverContent
-						align="start"
-						sideOffset={6}
-						className="w-[var(--radix-popover-trigger-width)] max-h-[300px] overflow-y-auto p-1.5 bg-[#1a1b1e]/95 backdrop-blur-3xl border-white/10"
-					>
-						<div className="flex flex-col gap-1">
-							{models.map((m) => {
-								const active = m.key === selectedModelKey;
-								const locked = !isPaid && !m.freeAccess;
-								const priceMap = m.billing === 'per_second' ? m.creditsPerSecond : m.credits;
-								const vals = priceMap ? Object.values(priceMap) : [];
-								const minCr = vals.length ? Math.min(...vals) : null;
-								const maxCr = vals.length ? Math.max(...vals) : null;
-								const unit = m.billing === 'per_second' ? ' cr/s' : ' cr';
-								return (
-									<button
-										key={m.key}
-										onClick={() => !locked && onSelectModel(m)}
-										disabled={locked}
-										title={locked ? 'Purchase credits to unlock this model' : undefined}
-										className={`w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-lg text-sm transition-colors text-left ${
-											locked
-												? 'opacity-40 cursor-not-allowed text-white/40'
-												: active
-												? 'bg-white/10 text-white'
-												: 'text-white/70 hover:text-white hover:bg-white/5'
-										}`}
-									>
-										<span className="flex flex-col min-w-0">
-											<span className="leading-tight truncate flex items-center gap-1.5">
-												{m.label}
-												{locked && (
-													<span className="text-[8px] font-bold px-1 py-0.5 rounded bg-white/10 text-white/50">
-														PRO
-													</span>
-												)}
-											</span>
-											<span className="text-[10px] text-white/40 font-mono truncate">
-												{m.provider}
-											</span>
-										</span>
-										<span className="flex items-center gap-2 shrink-0">
-											{minCr !== null && (
-												<span className="text-[10px] font-mono text-white/40 whitespace-nowrap">
-													{minCr === maxCr ? `${minCr}` : `${minCr}–${maxCr}`}{unit}
-												</span>
-											)}
-											{active && !locked && <Check className="w-4 h-4 text-white" />}
-										</span>
-									</button>
-								);
-							})}
-						</div>
-					</PopoverContent>
-				</Popover>
+				<ModelPicker
+					models={models}
+					selectedModelKey={selectedModelKey}
+					onSelectModel={onSelectModel}
+					isPaid={isPaid}
+				/>
 			</div>
 
 			{/* Cost summary */}

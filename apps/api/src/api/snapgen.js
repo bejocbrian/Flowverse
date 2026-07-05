@@ -1,16 +1,16 @@
 import logger from '../utils/logger.js';
 
 /**
- * GeminiGen API client for video and image generation.
+ * SnapGen API client for video and image generation.
  *
- * API Reference (from docs.geminigen.ai):
- *   Base URL:  https://api.geminigen.ai/uapi/v1
+ * API Reference (from docs.snapgen.ai):
+ *   Base URL:  https://api.snapgen.ai/uapi/v1
  *   Auth:      x-api-key header
  *   Format:    multipart/form-data
  *
  * Video endpoints:
  *   POST /video-gen/veo   — Veo models (veo-3.1, veo-3.1-fast, veo-2)
- *   POST /video-gen/sora  — Sora models (sora-2, sora-2-pro, sora-2-pro-hd)
+ *   POST /video-gen/grok  — Grok models (grok-3)
  *
  * Image endpoint:
  *   POST /generate_image  — Image models (nano-banana-pro, nano-banana-2, imagen-4)
@@ -21,11 +21,11 @@ import logger from '../utils/logger.js';
  * Status codes: 1 = Processing, 2 = Completed, 3 = Failed
  */
 
-const API_BASE_URL = () => process.env.INTEGRATED_AI_API_URL || 'https://api.geminigen.ai/uapi/v1';
+const API_BASE_URL = () => process.env.INTEGRATED_AI_API_URL || 'https://api.snapgen.ai/uapi/v1';
 const API_KEY = () => process.env.INTEGRATED_AI_API_KEY;
 
-/** GeminiGen status codes */
-export const GeminiGenStatus = {
+/** SnapGen status codes */
+export const SnapgenStatus = {
 	PROCESSING: 1,
 	COMPLETED: 2,
 	FAILED: 3,
@@ -50,8 +50,33 @@ const MODEL_PROVIDER_MAP = {
 	'grok-3': 'grok',
 };
 
+/** Model → extend provider mapping for video extend endpoint routing */
+const MODEL_EXTEND_PROVIDER_MAP = {
+	// Veo models → /video-extend/veo
+	'veo-3.1': 'veo',
+	'veo-3.1-fast': 'veo',
+	'veo-3.1-lite': 'veo',
+	'veo-2': 'veo',
+	// Grok models → /video-extend/grok
+	'grok-3': 'grok',
+};
+
 /**
- * Common headers for GeminiGen API requests
+ * Get the extend endpoint provider for a given model.
+ * @param {string} model - The model id (e.g., 'veo-3.1', 'grok-3')
+ * @returns {string} The provider key ('veo' or 'grok')
+ * @throws {Error} If the model is not supported for extend
+ */
+export function getExtendProvider(model) {
+	const provider = MODEL_EXTEND_PROVIDER_MAP[model];
+	if (!provider) {
+		throw new Error(`Model ${model} does not support video extend. Supported models: ${Object.keys(MODEL_EXTEND_PROVIDER_MAP).join(', ')}`);
+	}
+	return provider;
+}
+
+/**
+ * Common headers for SnapGen API requests
  */
 function getHeaders() {
 	return {
@@ -145,7 +170,7 @@ async function fetchWithRetry(endpoint, options, context = 'API') {
 }
 
 /**
- * Submit a video generation request to GeminiGen.
+ * Submit a video generation request to SnapGen.
  * Uses multipart/form-data as required by the API.
  *
  * @param {Object} params
@@ -214,16 +239,16 @@ export async function generateVideo({
 	}
 
 	const endpoint = `${API_BASE_URL()}/video-gen/${provider}`;
-	logger.info(`GeminiGen video request: POST ${endpoint} model=${model} refs=${refs.length} mode=${mode_image || 'none'}`);
+	logger.info(`SnapGen video request: POST ${endpoint} model=${model} refs=${refs.length} mode=${mode_image || 'none'}`);
 
 	const response = await fetchWithRetry(endpoint, {
 		method: 'POST',
 		headers: getHeaders(),
 		body: form,
-	}, 'GeminiGen video');
+	}, 'SnapGen video');
 
 	const data = await response.json();
-	logger.info(`GeminiGen video submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
+	logger.info(`SnapGen video submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
 
 	return {
 		uuid: data.uuid || data.id || data.request_id,
@@ -233,39 +258,39 @@ export async function generateVideo({
 }
 
 /**
- * Extend an existing GeminiGen video by its generation UUID.
- * Veo: POST /video-extend/veo with { prompt, ref_history }
- * Grok: POST /video-extend/grok with { prompt, ref_history }
+ * Extend an existing SnapGen video by its generation UUID.
+ * POST /video-extend/{provider} with { prompt, ref_history }.
  * Model/aspect/resolution are inherited from the source video by the vendor.
  *
  * @param {Object} params
  * @param {string} params.prompt - What should happen in the continuation.
- * @param {string} params.ref_history - UUID of a video previously generated on GeminiGen.
- * @param {string} [params.model] - Source video model id, used to pick the correct endpoint.
+ * @param {string} params.ref_history - UUID of a video previously generated on SnapGen.
+ * @param {string} [params.model] - Model id to determine extend endpoint (veo-3.1, veo-3.1-fast, veo-3.1-lite, veo-2, grok-3). Defaults to 'veo-3.1'.
  * @returns {Promise<{uuid: string, status: number}>}
  */
-export async function extendVideo({ prompt, ref_history, model }) {
+export async function extendVideo({ prompt, ref_history, model = 'veo-3.1' }) {
 	if (!ref_history) {
 		throw new Error('extendVideo requires ref_history (source video UUID)');
 	}
+
+	// Determine the provider endpoint based on model
+	const provider = getExtendProvider(model);
 
 	const form = new FormData();
 	form.append('prompt', prompt);
 	form.append('ref_history', ref_history);
 
-	// Route to the correct endpoint based on the source model's provider.
-	const provider = MODEL_PROVIDER_MAP[model] || 'veo';
 	const endpoint = `${API_BASE_URL()}/video-extend/${provider}`;
-	logger.info(`GeminiGen extend request: POST ${endpoint} model=${model || 'unknown'} ref_history=${ref_history}`);
+	logger.info(`SnapGen extend request: POST ${endpoint} model=${model} ref_history=${ref_history}`);
 
 	const response = await fetchWithRetry(endpoint, {
 		method: 'POST',
 		headers: getHeaders(),
 		body: form,
-	}, 'GeminiGen extend');
+	}, `SnapGen extend (${provider})`);
 
 	const data = await response.json();
-	logger.info(`GeminiGen extend submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
+	logger.info(`SnapGen extend submitted: uuid=${data.uuid || data.id || 'unknown'}, status=${data.status}`);
 
 	return {
 		uuid: data.uuid || data.id || data.request_id,
@@ -275,7 +300,7 @@ export async function extendVideo({ prompt, ref_history, model }) {
 }
 
 /**
- * Submit an image generation request to GeminiGen.
+ * Submit an image generation request to SnapGen.
  * Uses multipart/form-data as required by the API.
  *
  * @param {Object} params
@@ -301,16 +326,16 @@ export async function generateImage({
 	form.append('resolution', resolution);
 
 	const endpoint = `${API_BASE_URL()}/generate_image`;
-	logger.info(`GeminiGen image request: POST ${endpoint} model=${model}`);
+	logger.info(`SnapGen image request: POST ${endpoint} model=${model}`);
 
 	const response = await fetchWithRetry(endpoint, {
 		method: 'POST',
 		headers: getHeaders(),
 		body: form,
-	}, 'GeminiGen image');
+	}, 'SnapGen image');
 
 	const data = await response.json();
-	logger.info(`GeminiGen image submitted: uuid=${data.uuid || 'unknown'}`);
+	logger.info(`SnapGen image submitted: uuid=${data.uuid || 'unknown'}`);
 
 	return {
 		uuid: data.uuid || data.id || data.request_id,
@@ -321,10 +346,10 @@ export async function generateImage({
 }
 
 /**
- * Fetch generation history/status from GeminiGen API (polling fallback).
+ * Fetch generation history/status from SnapGen API (polling fallback).
  * GET /history/{conversion_uuid}
  *
- * Per GeminiGen docs the response shape includes:
+ * Per SnapGen docs the response shape includes:
  *   { id, uuid, status (1/2/3), status_desc, error_message,
  *     media_url, thumbnail_url,
  *     generated_video: [{ video_url, aspect_ratio }],
@@ -343,7 +368,7 @@ export async function getGenerationStatus(uuid) {
 	const response = await fetchWithRetry(endpoint, {
 		method: 'GET',
 		headers: getHeaders(),
-	}, 'GeminiGen status');
+	}, 'SnapGen status');
 
 	const data = await response.json();
 

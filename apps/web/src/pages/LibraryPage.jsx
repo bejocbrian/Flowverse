@@ -118,7 +118,7 @@ const VideoTile = ({ video, onDelete, selected, onToggleSelect, selectionMode })
 								className="absolute inset-0 w-full h-full object-cover"
 							/>
 						) : video.thumbnail_url ? (
-							// Image thumbnail provided by GeminiGen webhook
+							// Image thumbnail provided by SnapGen webhook
 							<img
 								src={video.thumbnail_url}
 								alt={video.prompt}

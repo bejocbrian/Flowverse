@@ -35,8 +35,8 @@ const paytmRateLimit = rateLimit({
 // Mirrors /cashfree/packs so the wallet renders identical pricing.
 // `videoUnitCredits` is the cheapest per-video cost so the UI can show how
 // many videos each pack is worth.
-router.get('/packs', (_req, res) => {
-	res.json({ packs: CREDIT_PACKS, currency: 'INR', videoUnitCredits: cheapestVideoCost() });
+router.get('/packs', async (_req, res) => {
+	res.json({ packs: CREDIT_PACKS, currency: 'INR', videoUnitCredits: await cheapestVideoCost() });
 });
 
 // GET /paytm/config - non-secret values the frontend SDK needs to render the

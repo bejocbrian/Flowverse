@@ -44,6 +44,9 @@ This starts:
 
 ### 3. Create Your First User Account
 
+### Terminal 2: Run the Webhook Tunnel (Localtunnel)
+Because SnapGen is on the public internet, it cannot send "Video Completed" webhooks directly to your `localhost:3001`. You must run a tunnel to expose it.
+
 1. Visit http://localhost:3000/signup
 2. Create a regular user account (not admin)
 3. You'll start with 80 free credits
@@ -60,6 +63,10 @@ This starts:
 3. Restart: `npm run dev`
 
 ### Issue: "Signup error: An error occurred while validating the submitted data"
+
+**Important Note about Localtunnel/Ngrok:**
+Yes! Every time you close this terminal, the tunnel dies. When you restart it, you will get a **new random URL** (e.g. `https://random-word.loca.lt`). 
+Because of this, every time you start a new localtunnel session, you **must** copy the new URL, go to the SnapGen Dashboard, and update your Webhook URL to: `https://<YOUR-NEW-URL>.loca.lt/webhooks/snapgen`
 
 **Cause:** PocketBase schema not initialized, or captcha issues.
 

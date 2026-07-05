@@ -23,10 +23,10 @@ router.use(pocketbaseAuth);
 // GET /stripe/packs - public list of credit packs for the wallet UI (USD pricing).
 // Price is derived from the INR pack price at a fixed rate. The wallet renders
 // from this so displayed price always matches what Stripe will charge.
-router.get('/packs', (_req, res) => {
+router.get('/packs', async (_req, res) => {
 	// USD prices are stored as priceUSD on packs if present, or derived from INR.
 	// We expose them so the frontend never hard-codes amounts.
-	res.json({ packs: CREDIT_PACKS, currency: 'USD', videoUnitCredits: cheapestVideoCost() });
+	res.json({ packs: CREDIT_PACKS, currency: 'USD', videoUnitCredits: await cheapestVideoCost() });
 });
 
 // POST /stripe/create-checkout-session

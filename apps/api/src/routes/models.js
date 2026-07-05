@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getEnabledModels, variantDurations, variantResolutions } from '../constants/models.js';
+import { getEnabledModels as dbGetEnabledModels, variantDurations, variantResolutions } from '../utils/modelCatalog.js';
 import { variantPricingDisplay } from '../utils/creditCalculator.js';
 
 const router = Router();
@@ -10,27 +10,26 @@ const router = Router();
 // The frontend uses `billing` + the pricing fields to render the price AND a
 // live estimate, computing per_second cost with the SAME ceil(rate*duration)
 // formula the server charges with - so display and charge never diverge.
-router.get('/', (_req, res) => {
-	const models = getEnabledModels().map((m) => ({
-		key: m.key,
-		id: m.id,
-		label: m.label,
-		provider: m.provider,
-		type: m.type,
-		durations: variantDurations(m),
-		resolutions: variantResolutions(m),
-		aspectRatios: Array.isArray(m.aspectRatios) ? m.aspectRatios : ['16:9'],
-		imageModes: Array.isArray(m.imageModes) ? m.imageModes : [],
-		maxRefImages: Number.isFinite(m.maxRefImages) ? m.maxRefImages : 0,
-		freeAccess: m.freeAccess === true,
-		// chainedDurations: { duration -> clipCount } for multi-clip modes.
-		// Undefined/empty means all durations are single-clip.
-		...(m.chainedDurations && Object.keys(m.chainedDurations).length > 0
-			? { chainedDurations: m.chainedDurations }
-			: {}),
-		...variantPricingDisplay(m), // { billing, credits } or { billing, creditsPerSecond }
-	}));
-	res.json({ models });
+router.get('/', async (_req, res) => {
+	try {
+		const models = (await dbGetEnabledModels()).map((m) => ({
+			key: m.key,
+			id: m.id,
+			label: m.label,
+			provider: m.provider,
+			type: m.type,
+			durations: variantDurations(m),
+			resolutions: variantResolutions(m),
+			aspectRatios: Array.isArray(m.aspectRatios) ? m.aspectRatios : ['16:9'],
+			imageModes: Array.isArray(m.imageModes) ? m.imageModes : [],
+			maxRefImages: Number.isFinite(m.maxRefImages) ? m.maxRefImages : 0,
+			freeAccess: m.freeAccess === true,
+			...variantPricingDisplay(m), // { billing, credits } or { billing, creditsPerSecond }
+		}));
+		res.json({ models });
+	} catch (err) {
+		res.status(500).json({ error: 'Failed to load models' });
+	}
 });
 
 export default router;

@@ -31,10 +31,11 @@ const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage.jsx'));
 const QueuePage = lazy(() => import('@/pages/QueuePage.jsx'));
 
 // Admin Pages
-const AdminDashboard = lazy(() => import('@/pages/AdminDashboard.jsx'));
-const AdminProvidersPage = lazy(() => import('@/pages/AdminProvidersPage.jsx'));
-const AdminUsersPage = lazy(() => import('@/pages/AdminUsersPage.jsx'));
-const AdminSettingsPage = lazy(() => import('@/pages/AdminSettingsPage.jsx'));
+import AdminDashboard from '@/pages/AdminDashboard.jsx';
+import AdminProvidersPage from '@/pages/AdminProvidersPage.jsx';
+import AdminModelsPage from '@/pages/AdminModelsPage.jsx';
+import AdminUsersPage from '@/pages/AdminUsersPage.jsx';
+import AdminSettingsPage from '@/pages/AdminSettingsPage.jsx';
 
 function App() {
   return (
@@ -190,47 +191,57 @@ function App() {
               }
             />
 
-            {/* Admin Routes */}
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <AdminLayout>
-                    <AdminDashboard />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/providers"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <AdminLayout>
-                    <AdminProvidersPage />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/users"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <AdminLayout>
-                    <AdminUsersPage />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/settings"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <AdminLayout>
-                    <AdminSettingsPage />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
+          {/* Admin Routes */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminLayout>
+                  <AdminDashboard />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/providers"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminLayout>
+                  <AdminProvidersPage />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/models"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminLayout>
+                  <AdminModelsPage />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminLayout>
+                  <AdminUsersPage />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminLayout>
+                  <AdminSettingsPage />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
 
             {/* 404 */}
             <Route

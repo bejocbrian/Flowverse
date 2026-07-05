@@ -1,11 +1,11 @@
 /**
- * GeminiGen webhook handler.
+ * SnapGen webhook handler.
  *
- * Reference (https://docs.geminigen.ai / https://ainnate-geminigen.github.io/GEMINIGEN.AI-API-DEMO):
+ * Reference (https://docs.snapgen.ai):
  *
  *   {
- *     "event_name": "VIDEO_GENERATION_COMPLETED",
- *     "event_uuid": "<uuid for this delivery>",
+ *     "event": "VIDEO_GENERATION_COMPLETED",
+ *     "uuid": "<event uuid for signature verification>",
  *     "data": {
  *       "uuid":            "<request uuid - matches our external_id>",
  *       "model_name":      "veo-2",
@@ -15,7 +15,7 @@
  *       "status_percentage": 100,
  *       "error_message":   "",
  *       "media_url":       "https://....mp4",
- *       "thumbnail_url":   "https://cdn.geminigen.ai/.../uuid_0_200px.jpg",
+ *       "thumbnail_url":   "https://cdn.snapgen.ai/.../uuid_0_200px.jpg",
  *       "created_at":      "...",
  *       "updated_at":      "..."
  *     }
@@ -23,7 +23,7 @@
  *
  * Image webhooks omit `thumbnail_url` and use `media_url` for the image itself.
  *
- * Older field names (event/event_type, request_id, video_url, image_url) are
+ * Older field names (event_name/event_type, request_id, video_url, image_url) are
  * accepted as fallbacks in case the upstream sends a slightly different shape.
  */
 import { Router } from 'express';
@@ -53,7 +53,7 @@ const IMAGE_FAILED_EVENTS = new Set([
 	'image.failed',
 ]);
 
-router.post('/geminigen', async (req, res) => {
+router.post('/snapgen', async (req, res) => {
 	try {
 		const body = req.body || {};
 		const event = body.event_name || body.event || body.event_type;
@@ -64,7 +64,7 @@ router.post('/geminigen', async (req, res) => {
 		const eventUuid = body.event_uuid || requestUuid;
 		const signature = req.headers['x-signature'];
 
-		if (process.env.GEMINIGEN_WEBHOOK_PUBLIC_KEY_PATH && signature && eventUuid) {
+		if (process.env.SNAPGEN_WEBHOOK_PUBLIC_KEY_PATH && signature && eventUuid) {
 			try {
 				if (!verifySignature(eventUuid, signature)) {
 					logger.warn('Webhook signature verification failed');
@@ -80,7 +80,7 @@ router.post('/geminigen', async (req, res) => {
 			return res.status(400).json({ error: 'Missing event or uuid' });
 		}
 
-		logger.info(`GeminiGen webhook: ${event} request=${requestUuid}`);
+		logger.info(`SnapGen webhook: ${event} request=${requestUuid}`);
 
 		if (VIDEO_COMPLETED_EVENTS.has(event)) {
 			await handleVideoCompleted(data, requestUuid);
@@ -94,7 +94,7 @@ router.post('/geminigen', async (req, res) => {
 			logger.warn(`Unhandled webhook event: ${event}`);
 		}
 
-		// Always 200. We don't want GeminiGen retrying delivery if our processing
+		// Always 200. We don't want SnapGen retrying delivery if our processing
 		// errors - we have polling fallback for that.
 		res.status(200).json({ received: true });
 	} catch (error) {
@@ -253,7 +253,7 @@ async function handleImageFailed(data, uuid) {
 
 function verifySignature(eventUuid, signature) {
 	try {
-		const publicKeyPath = process.env.GEMINIGEN_WEBHOOK_PUBLIC_KEY_PATH;
+		const publicKeyPath = process.env.SNAPGEN_WEBHOOK_PUBLIC_KEY_PATH;
 		if (!publicKeyPath) return true;
 
 		const publicKey = readFileSync(publicKeyPath, 'utf-8');

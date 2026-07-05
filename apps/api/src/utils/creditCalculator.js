@@ -4,7 +4,10 @@
  * displayed price (routes/models.js) call into this module, so display and
  * charge can never diverge.
  *
- * Pricing is catalog-driven and unit-aware (see constants/models.js):
+ * Pricing is catalog-driven and unit-aware. The catalog is now read from
+ * PocketBase `model_catalog` collection via modelCatalog.js, with a hardcoded
+ * fallback if the DB is unavailable.
+ *
  *   per_video  -> credits[resolution]                       (duration ignored)
  *   per_second -> ceil(creditsPerSecond[resolution] * duration)
  *   per_image  -> credits[resolution]
@@ -13,7 +16,7 @@
  * The rupee markup lives in the wallet layer, not here.
  */
 
-import { MODEL_VARIANTS, getVariantByKey, variantResolutions, chainedClipCount } from '../constants/models.js';
+import { loadCatalog, getVariantByKey as dbGetVariantByKey, variantResolutions as dbVariantResolutions } from './modelCatalog.js';
 
 export const DEFAULT_DURATION = 8;
 
@@ -38,8 +41,8 @@ function priceMapFor(variant) {
  * @throws if the variant/resolution is unknown or mispriced (fail-closed:
  *         we never silently charge 0).
  */
-export function creditCost({ modelKey, resolution, duration }) {
-	const variant = getVariantByKey(modelKey);
+export async function creditCost({ modelKey, resolution, duration }) {
+	const variant = await dbGetVariantByKey(modelKey);
 	if (!variant) {
 		throw new Error(`creditCost: unknown model key "${modelKey}"`);
 	}
@@ -97,59 +100,113 @@ export function variantPricingDisplay(variant) {
 }
 
 /**
- * Fail-fast catalog validation. Called once at startup. Throws on the first
- * misconfigured variant so a bad price can never reach production silently.
+ * Fail-fast catalog validation. Called once at startup.
+ * Validates the DB catalog, falls back to hardcoded if DB fails.
+ * Throws on the first misconfigured variant so a bad price can never
+ * reach production silently.
  */
-export function validateCatalog() {
-	const seenKeys = new Set();
+export async function validateCatalog() {
+	try {
+		const catalog = await loadCatalog();
+		const seenKeys = new Set();
 
-	for (const v of MODEL_VARIANTS) {
-		const where = `model "${v.key || v.id || '?'}"`;
+		for (const v of catalog) {
+			const where = `model "${v.key || v.id || '?'}"`;
 
-		if (!v.key) throw new Error(`Catalog: a variant is missing "key"`);
-		if (seenKeys.has(v.key)) throw new Error(`Catalog: duplicate key "${v.key}"`);
-		seenKeys.add(v.key);
+			if (!v.key) throw new Error(`Catalog: a variant is missing "key"`);
+			if (seenKeys.has(v.key)) throw new Error(`Catalog: duplicate key "${v.key}"`);
+			seenKeys.add(v.key);
 
-		if (!v.id) throw new Error(`Catalog: ${where} is missing vendor "id"`);
-		if (!['per_video', 'per_second', 'per_image'].includes(v.billing)) {
-			throw new Error(`Catalog: ${where} has invalid billing "${v.billing}"`);
-		}
+			if (!v.id) throw new Error(`Catalog: ${where} is missing vendor "id"`);
+			if (!['per_video', 'per_second', 'per_image'].includes(v.billing)) {
+				throw new Error(`Catalog: ${where} has invalid billing "${v.billing}"`);
+			}
 
-		const map = priceMapFor(v);
-		if (!map || typeof map !== 'object' || Object.keys(map).length === 0) {
-			const field = v.billing === 'per_second' ? 'creditsPerSecond' : 'credits';
-			throw new Error(`Catalog: ${where} (${v.billing}) is missing a non-empty "${field}" map`);
-		}
-		for (const [resKey, rate] of Object.entries(map)) {
-			if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
-				throw new Error(`Catalog: ${where} has invalid rate for "${resKey}": ${rate}`);
+			const map = priceMapFor(v);
+			if (!map || typeof map !== 'object' || Object.keys(map).length === 0) {
+				const field = v.billing === 'per_second' ? 'creditsPerSecond' : 'credits';
+				throw new Error(`Catalog: ${where} (${v.billing}) is missing a non-empty "${field}" map`);
+			}
+			for (const [resKey, rate] of Object.entries(map)) {
+				if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
+					throw new Error(`Catalog: ${where} has invalid rate for "${resKey}": ${rate}`);
+				}
+			}
+
+			// Duration sanity for per_second models.
+			if (v.billing === 'per_second') {
+				const hasList = Array.isArray(v.durations) && v.durations.length > 0;
+				const hasRange = Number.isFinite(v.minDuration) && Number.isFinite(v.maxDuration);
+				if (!hasList && !hasRange) {
+					throw new Error(`Catalog: per_second ${where} needs "durations" or min/maxDuration`);
+				}
+				if (hasRange && v.minDuration > v.maxDuration) {
+					throw new Error(`Catalog: ${where} has minDuration > maxDuration`);
+				}
+			}
+
+			if (v.enabled && !v.routed) {
+				// Warn but don't crash — admin might be preparing a model
+				console.warn(`Catalog: ${where} is enabled but not routed — generation will fail for this model`);
 			}
 		}
 
-		// Duration sanity for per_second models.
-		if (v.billing === 'per_second') {
-			const hasList = Array.isArray(v.durations) && v.durations.length > 0;
-			const hasRange = Number.isFinite(v.minDuration) && Number.isFinite(v.maxDuration);
-			if (!hasList && !hasRange) {
-				throw new Error(`Catalog: per_second ${where} needs "durations" or min/maxDuration`);
-			}
-			if (hasRange && v.minDuration > v.maxDuration) {
-				throw new Error(`Catalog: ${where} has minDuration > maxDuration`);
-			}
-		}
+		return true;
+	} catch (err) {
+		// If DB validation fails, try hardcoded fallback
+		console.error('DB catalog validation failed, trying hardcoded fallback:', err.message);
+		try {
+			const { MODEL_VARIANTS } = await import('../constants/models.js');
+			const seenKeys = new Set();
 
-		// An enabled model must be routed to the vendor, else users get
-		// charged then fail. Enforced so we can't ship a sellable-but-broken model.
-		if (v.enabled && !v.routed) {
-			throw new Error(`Catalog: ${where} is enabled but not routed to the vendor`);
+			for (const v of MODEL_VARIANTS) {
+				const where = `model "${v.key || v.id || '?'}"`;
+
+				if (!v.key) throw new Error(`Catalog: a variant is missing "key"`);
+				if (seenKeys.has(v.key)) throw new Error(`Catalog: duplicate key "${v.key}"`);
+				seenKeys.add(v.key);
+
+				if (!v.id) throw new Error(`Catalog: ${where} is missing vendor "id"`);
+				if (!['per_video', 'per_second', 'per_image'].includes(v.billing)) {
+					throw new Error(`Catalog: ${where} has invalid billing "${v.billing}"`);
+				}
+
+				const map = priceMapFor(v);
+				if (!map || typeof map !== 'object' || Object.keys(map).length === 0) {
+					const field = v.billing === 'per_second' ? 'creditsPerSecond' : 'credits';
+					throw new Error(`Catalog: ${where} (${v.billing}) is missing a non-empty "${field}" map`);
+				}
+				for (const [resKey, rate] of Object.entries(map)) {
+					if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
+						throw new Error(`Catalog: ${where} has invalid rate for "${resKey}": ${rate}`);
+					}
+				}
+
+				if (v.billing === 'per_second') {
+					const hasList = Array.isArray(v.durations) && v.durations.length > 0;
+					const hasRange = Number.isFinite(v.minDuration) && Number.isFinite(v.maxDuration);
+					if (!hasList && !hasRange) {
+						throw new Error(`Catalog: per_second ${where} needs "durations" or min/maxDuration`);
+					}
+					if (hasRange && v.minDuration > v.maxDuration) {
+						throw new Error(`Catalog: ${where} has minDuration > maxDuration`);
+					}
+				}
+
+				if (v.enabled && !v.routed) {
+					console.warn(`Catalog: ${where} is enabled but not routed — generation will fail for this model`);
+				}
+			}
+
+			return true;
+		} catch (fallbackErr) {
+			throw new Error(`Both DB and hardcoded catalog validation failed. DB: ${err.message}; Fallback: ${fallbackErr.message}`);
 		}
 	}
-
-	return true;
 }
 
 // Re-export so callers can resolve a variant's resolution set consistently.
-export { variantResolutions };
+export { dbVariantResolutions as variantResolutions };
 
 // Re-export chain helpers so route handlers and workers can detect and route
 // chained durations without importing directly from constants/models.js.
@@ -164,9 +221,10 @@ export { chainedClipDuration } from '../constants/models.js';
  *
  * Returns a positive integer, or null if no per_video model is enabled.
  */
-export function cheapestVideoCost() {
+export async function cheapestVideoCost() {
+	const catalog = await loadCatalog();
 	let min = Infinity;
-	for (const v of MODEL_VARIANTS) {
+	for (const v of catalog) {
 		if (!v.enabled || v.type !== 'video' || v.billing !== 'per_video') continue;
 		for (const rate of Object.values(v.credits || {})) {
 			if (typeof rate === 'number' && rate > 0 && rate < min) min = rate;

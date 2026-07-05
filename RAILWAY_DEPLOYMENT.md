@@ -78,8 +78,8 @@ POCKETBASE_URL=https://your-pocketbase-url
 PB_SUPERUSER_EMAIL=your-admin-email
 PB_SUPERUSER_PASSWORD=your-admin-password
 
-INTEGRATED_AI_API_URL=https://api.geminigen.ai/uapi/v1
-INTEGRATED_AI_API_KEY=your-geminigen-api-key
+INTEGRATED_AI_API_URL=https://api.snapgen.ai/uapi/v1
+INTEGRATED_AI_API_KEY=your-snapgen-api-key
 WEBSITE_ID=your-website-id
 WEBSITE_DOMAIN=your-railway-url
 
@@ -126,9 +126,9 @@ Update your API's `CORS_ORIGIN` environment variable to include your web app's R
 | `POCKETBASE_URL` | PocketBase instance URL | `https://pb.yourdomain.com` |
 | `PB_SUPERUSER_EMAIL` | PocketBase admin email | `admin@example.com` |
 | `PB_SUPERUSER_PASSWORD` | PocketBase admin password | `your-secure-password` |
-| `INTEGRATED_AI_API_URL` | GeminiGen API URL | `https://api.geminigen.ai/uapi/v1` |
-| `INTEGRATED_AI_API_KEY` | GeminiGen API key | `geminiai-xxx` |
-| `WEBSITE_ID` | GeminiGen website ID | `your-website-id` |
+| `INTEGRATED_AI_API_URL` | SnapGen API URL | `https://api.snapgen.ai/uapi/v1` |
+| `INTEGRATED_AI_API_KEY` | SnapGen API key | `snapgen-xxx` |
+| `WEBSITE_ID` | SnapGen website ID | `your-website-id` |
 | `WEBSITE_DOMAIN` | Your website domain | `yourdomain.com` |
 | `STRIPE_SECRET_KEY` | Stripe API key | `sk_live_xxx` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret | `whsec_xxx` |

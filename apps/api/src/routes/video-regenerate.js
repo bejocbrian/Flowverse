@@ -4,11 +4,11 @@ import { readFile } from 'node:fs/promises';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
-import { generateVideo, generateImage, extendVideo, getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
+import { generateVideo, generateImage, extendVideo, getExtendProvider, SnapgenStatus } from '../api/snapgen.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
 import { freeUserGenerationRateLimit } from '../middleware/generation-rate-limit.js';
 import { creditCost as computeCreditCost } from '../utils/creditCalculator.js';
-import { getEnabledModels } from '../constants/models.js';
+import { getEnabledModels } from '../utils/modelCatalog.js';
 import { isPaidUser } from '../utils/userTier.js';
 import { refundCredits } from '../utils/dbTransaction.js';
 import { createTempDir, cleanupTempDir, downloadAndMerge } from '../utils/videoMerger.js';
@@ -89,7 +89,7 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 		// free user could otherwise re-run a paid model. Gate it the same way as
 		// fresh generation.
 		const regenVariant =
-			getEnabledModels().find((m) => m.id === video.model) || null;
+			(await getEnabledModels()).find((m) => m.id === video.model) || null;
 		if (!regenVariant || !regenVariant.freeAccess) {
 			const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
 			if (!paid) {
@@ -113,10 +113,10 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 				if (varyQuality) quality = varyQuality;
 			}
 
-			const creditCost = (() => {
+			const creditCost = await (async () => {
 				// Resolve the catalog variant from the original video's vendor
 				// id + resolution, then price via the single shared calculator.
-				const enabled = getEnabledModels();
+				const enabled = await getEnabledModels();
 				const variant =
 					enabled.find((m) => m.id === video.model && (m.credits?.[quality] != null || m.creditsPerSecond?.[quality] != null)) ||
 					enabled.find((m) => m.id === video.model) ||
@@ -172,9 +172,9 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 				video_id: newVideo.id,
 			});
 
-			// Submit to GeminiGen API asynchronously
-			submitToGeminiGen(newVideo, isImage).catch(error => {
-				logger.error(`GeminiGen regen submission failed for ${newVideo.id}:`, error.message);
+			// Submit to SnapGen API asynchronously
+			submitToSnapGen(newVideo, isImage).catch(error => {
+				logger.error(`SnapGen regen submission failed for ${newVideo.id}:`, error.message);
 			});
 		}
 
@@ -196,11 +196,12 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
 /**
  * POST /videos/:id/extend - Extend a completed video with a follow-up clip.
  *
- * Uses GeminiGen's /video-extend/{provider} endpoint. After the new clip is
- * ready, it is concatenated with all previous clips (tracked in clip_urls)
- * via FFmpeg to produce a single merged video file. The merged file is stored
- * back to PocketBase and becomes the new video_url — so the user always sees
- * one growing video, not a collection of separate clips.
+ * Uses SnapGen's /video-extend/{provider} (veo or grok), which takes the
+ * SOURCE video's generation UUID (our `external_id`) as `ref_history`.
+ * Model/aspect/resolution are inherited by the vendor, so we charge the same
+ * credits as a fresh generation of the source video's model/resolution.
+ * After the new clip is ready, it is concatenated with all previous clips
+ * (tracked in clip_urls) via FFmpeg to produce a single merged video file.
  *
  * The chain:
  *   original (clip_urls: [url1])
@@ -208,7 +209,7 @@ router.post('/:id/regenerate', freeUserGenerationRateLimit, async (req, res) => 
  *     → extend 2 (clip_urls: [url1, url2, url3], video_url: merged_1+2+3)
  *     → ...up to ~15 clips (8s each ≈ 2 minutes total)
  *
- * external_id always tracks the LATEST GeminiGen clip UUID for the next call.
+ * external_id always tracks the LATEST SnapGen clip UUID for the next call.
  */
 router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 	const { id } = req.params;
@@ -256,8 +257,13 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		if (source.status !== 'completed') {
 			return res.status(400).json({ error: 'Only completed videos can be extended' });
 		}
+		// Extend needs the SnapGen source UUID. external_id is hidden but the
+		// superuser API client reads it.
 		if (!source.external_id) {
-			return res.status(400).json({ error: 'This video cannot be extended (no external ID)' });
+			logger.warn(`Extend failed: video ${id} has no external_id (source model: ${source.model}, status: ${source.status})`);
+			return res.status(400).json({ 
+				error: 'This video cannot be extended. The original generation may not have completed successfully or was created before the extend feature was available.' 
+			});
 		}
 
 		// Resolve all existing clip URLs from the source video.
@@ -276,8 +282,8 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 			existingClipUrls = [source.video_url];
 		}
 
-		// Price the extend the same as a fresh generation of the source model.
-		const enabled = getEnabledModels();
+		// Price the extend like a fresh generation of the source's model/resolution.
+		const enabled = await getEnabledModels();
 		const variant =
 			enabled.find((m) => m.id === source.model && (m.credits?.[source.quality] != null || m.creditsPerSecond?.[source.quality] != null)) ||
 			enabled.find((m) => m.id === source.model) ||
@@ -285,6 +291,13 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		if (!variant) {
 			return res.status(400).json({ error: 'Source model is no longer available for extend' });
 		}
+		// Check if the model supports extend
+		try {
+			getExtendProvider(source.model);
+		} catch (extendErr) {
+			return res.status(400).json({ error: `Model ${source.model} does not support video extend` });
+		}
+		// Model access tier: free users can only extend free-access models.
 		if (!variant.freeAccess) {
 			const paid = await isPaidUser(req.pocketbaseUserId).catch(() => false);
 			if (!paid) {
@@ -297,7 +310,7 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 
 		let creditCost;
 		try {
-			creditCost = computeCreditCost({ modelKey: variant.key, resolution: source.quality, duration: source.duration });
+			creditCost = await computeCreditCost({ modelKey: variant.key, resolution: source.quality, duration: source.duration });
 		} catch (priceErr) {
 			logger.error(`Extend pricing error for ${variant.key}: ${priceErr.message}`);
 			return res.status(400).json({ error: 'Could not price this extension' });
@@ -312,6 +325,7 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 		const newVideo = await pb.collection('videos').create({
 			user_id: req.pocketbaseUserId,
 			prompt: prompt.trim(),
+			negative_prompt: source.negative_prompt || '',
 			status: 'queued',
 			aspect_ratio: source.aspect_ratio,
 			duration: source.duration,
@@ -364,18 +378,18 @@ router.post('/:id/extend', freeUserGenerationRateLimit, async (req, res) => {
 });
 
 /**
- * Submit extend to GeminiGen, poll for the new clip, then merge all clips
+ * Submit extend to SnapGen, poll for the new clip, then merge all clips
  * into a single video file and upload it to PocketBase.
  *
  * @param {Object}   videoRecord       - The newly-created extend video DB record.
- * @param {string}   sourceUuid        - GeminiGen UUID of the latest clip (ref_history).
+ * @param {string}   sourceUuid        - SnapGen UUID of the latest clip (ref_history).
  * @param {string}   sourceModel       - Model ID for routing to the correct endpoint.
  * @param {string[]} existingClipUrls  - Ordered array of all prior clip URLs to prepend.
  */
 async function submitExtendAndMerge(videoRecord, sourceUuid, sourceModel, existingClipUrls) {
 	let tempDir = null;
 	try {
-		// 1. Submit the extend to GeminiGen
+		// 1. Submit the extend to SnapGen
 		await pb.collection('videos').update(videoRecord.id, { status: 'generating' });
 		const result = await extendVideo({
 			prompt: videoRecord.prompt,
@@ -389,7 +403,7 @@ async function submitExtendAndMerge(videoRecord, sourceUuid, sourceModel, existi
 		await pb.collection('videos').update(videoRecord.id, { external_id: newClipUuid });
 		logger.info(`Extend submitted: video=${videoRecord.id}, new_clip_uuid=${newClipUuid}`);
 
-		// 2. Poll GeminiGen until the new clip is ready
+		// 2. Poll SnapGen until the new clip is ready
 		const newClipUrl = await pollUntilComplete(newClipUuid, videoRecord.id);
 
 		// 3. Build the full ordered clip list: existing clips + new clip
@@ -437,7 +451,6 @@ async function submitExtendAndMerge(videoRecord, sourceUuid, sourceModel, existi
 		if (rawMessage.includes('INVALID_VIDEO_LENGTH')) {
 			userMessage = 'This video duration is not supported by the provider. Please try a shorter clip.';
 		}
-
 		try {
 			await pb.collection('videos').update(videoRecord.id, {
 				status: 'failed',
@@ -462,10 +475,10 @@ async function submitExtendAndMerge(videoRecord, sourceUuid, sourceModel, existi
 }
 
 /**
- * Poll GeminiGen until a clip is complete, then return its video URL.
+ * Poll SnapGen until a clip is complete, then return its video URL.
  * Uses the same timing config as generationProcessor.js.
  *
- * @param {string} uuid       - GeminiGen UUID to poll.
+ * @param {string} uuid       - SnapGen UUID to poll.
  * @param {string} videoId    - Our DB video ID (for logging).
  * @returns {Promise<string>} - Public URL of the completed clip.
  */
@@ -477,13 +490,13 @@ async function pollUntilComplete(uuid, videoId) {
 			const status = await getGenerationStatus(uuid);
 			logger.info(`Extend poll #${attempt} for ${videoId}: status=${status.status}`);
 
-			if (status.status === GeminiGenStatus.COMPLETED) {
+			if (status.status === SnapgenStatus.COMPLETED) {
 				const url = status.video_url || status.media_url;
-				if (!url) throw new Error('GeminiGen returned completed status but no video URL');
+				if (!url) throw new Error('SnapGen returned completed status but no video URL');
 				return url;
 			}
 
-			if (status.status === GeminiGenStatus.FAILED) {
+			if (status.status === SnapgenStatus.FAILED) {
 				throw new Error(status.error_message || 'Extend clip generation failed on provider side');
 			}
 			// Status 1 = still processing, keep polling
@@ -497,9 +510,9 @@ async function pollUntilComplete(uuid, videoId) {
 }
 
 /**
- * Submit regeneration to GeminiGen API (async, fire-and-forget)
+ * Submit regeneration to SnapGen API (async, fire-and-forget)
  */
-async function submitToGeminiGen(videoRecord, isImage) {
+async function submitToSnapGen(videoRecord, isImage) {
 	try {
 		await pb.collection('videos').update(videoRecord.id, { status: 'processing' });
 

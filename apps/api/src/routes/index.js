@@ -25,6 +25,7 @@ import promptHistoryRouter from './prompt-history.js';
 import videoRegenerateRouter from './video-regenerate.js';
 import batchRouter from './batch.js';
 import previewRouter from './preview.js';
+import modelCatalogRouter from './model-catalog.js';
 
 export default () => {
 	const router = Router();
@@ -60,6 +61,7 @@ export default () => {
 	router.use('/admin/users', adminUsersRouter);
 	router.use('/admin/settings', adminSettingsRouter);
 	router.use('/admin/analytics', adminAnalyticsRouter);
+	router.use('/model-catalog', modelCatalogRouter);
 
 	return router;
 };

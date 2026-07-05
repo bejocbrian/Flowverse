@@ -4,7 +4,7 @@
 //
 // Adds to `transactions`:
 //   - description       (text)  human-readable audit; also used by the
-//                               GeminiGen refund path in webhooks.js
+//                               SnapGen refund path in webhooks.js
 //   - video_id          (text)  used by the refund path
 //   - cashfree_order_id (text)  the idempotency key for paid Cashfree orders
 //

@@ -101,7 +101,7 @@ const HEALTH_URLS = {
 	anthropic: 'https://api.anthropic.com/v1/models',
 	gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
 	google: 'https://generativelanguage.googleapis.com/v1beta/models',
-	geminigen: 'https://api.geminigen.ai/health',
+	geminigen: 'https://api.snapgen.ai/health',
 	runway: 'https://api.runwayml.com/health',
 	pika: 'https://api.pika.art/health',
 };

@@ -14,13 +14,18 @@ import { validateCatalog } from './utils/creditCalculator.js';
 
 // Fail fast: a mispriced or misconfigured model variant must crash the server
 // at boot rather than silently charge 0 or 404 a generation in production.
-try {
-	validateCatalog();
-	logger.info('Model catalog validated');
-} catch (err) {
-	logger.error('Model catalog validation failed:', err.message);
-	throw err;
-}
+// validateCatalog is now async (reads from DB with hardcoded fallback).
+const boot = async () => {
+	try {
+		await validateCatalog();
+		logger.info('Model catalog validated');
+	} catch (err) {
+		logger.error('Model catalog validation failed:', err.message);
+		throw err;
+	}
+};
+
+await boot();
 
 const app = express();
 

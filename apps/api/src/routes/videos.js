@@ -3,9 +3,9 @@ import { randomBytes } from 'node:crypto';
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
-import { getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
+import { getGenerationStatus, SnapgenStatus } from '../api/snapgen.js';
 import { creditCost as computeCreditCost, variantPricingDisplay } from '../utils/creditCalculator.js';
-import { getEnabledModels } from '../constants/models.js';
+import { getEnabledModels } from '../utils/modelCatalog.js';
 import { withTransaction, refundCredits } from '../utils/dbTransaction.js';
 import { processGeneration } from '../workers/generationProcessor.js';
 import { checkDailyGenerationCap } from '../utils/generationLimit.js';
@@ -30,8 +30,9 @@ const router = Router();
 // Catalog-driven; same data /models returns. Kept for backwards compat.
 router.get('/credit-costs', async (_req, res) => {
 	try {
+		const enabled = await getEnabledModels();
 		const modelCosts = {};
-		for (const v of getEnabledModels()) {
+		for (const v of enabled) {
 			modelCosts[v.key] = { billing: v.billing, ...variantPricingDisplay(v) };
 		}
 		res.json({ modelCosts });
@@ -83,7 +84,7 @@ router.get('/', async (req, res) => {
 	}
 });
 
-// POST /videos - Create video/image generation request and submit to GeminiGen
+// POST /videos - Create video/image generation request and submit to SnapGen
 router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	const { prompt, negative_prompt, aspect_ratio, duration, quality, provider, model, model_key, output_type, idempotency_key, image_mode, ref_images } = req.body;
 
@@ -159,7 +160,7 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 	// variant with that id. Server is authoritative: only enabled+routed
 	// models can be generated, and pricing comes from the catalog (never the
 	// client), so a user can't select a disabled model or spoof a price.
-	const enabled = getEnabledModels();
+	const enabled = await getEnabledModels();
 	let variant = null;
 	if (model_key) {
 		variant = enabled.find((m) => m.key === model_key) || null;
@@ -186,7 +187,7 @@ router.post('/', freeUserGenerationRateLimit, async (req, res) => {
 
 	let creditCost;
 	try {
-		creditCost = computeCreditCost({
+		creditCost = await computeCreditCost({
 			modelKey: variant.key,
 			resolution: quality,
 			duration,
@@ -404,7 +405,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // GET /videos/:id/status - Quick status check (used by frontend polling)
-// If video is still "generating" and has an external_id, actively check GeminiGen
+// If video is still "generating" and has an external_id, actively check SnapGen
 router.get('/:id/status', async (req, res) => {
 	const { id } = req.params;
 
@@ -415,13 +416,13 @@ router.get('/:id/status', async (req, res) => {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		// Active check: if video is stuck in "generating", check GeminiGen directly
+		// Active check: if video is stuck in "generating", check SnapGen directly
 		if ((video.status === 'generating' || video.status === 'queued') && video.external_id) {
 			try {
 				const genStatus = await getGenerationStatus(video.external_id);
-				logger.info(`Active status check for ${id}: GeminiGen status=${genStatus.status} (${genStatus.status_desc || ''})`);
+				logger.info(`Active status check for ${id}: SnapGen status=${genStatus.status} (${genStatus.status_desc || ''})`);
 
-				if (genStatus.status === GeminiGenStatus.COMPLETED) {
+				if (genStatus.status === SnapgenStatus.COMPLETED) {
 					const isImage = video.output_type === 'image';
 					const mediaUrl = isImage
 						? (genStatus.image_url || genStatus.media_url || genStatus.video_url)
@@ -439,7 +440,7 @@ router.get('/:id/status', async (req, res) => {
 
 					logger.info(`Generation completed via active check: ${id}`);
 					video = await pb.collection('videos').getOne(id);
-				} else if (genStatus.status === GeminiGenStatus.FAILED) {
+				} else if (genStatus.status === SnapgenStatus.FAILED) {
 					const errMsg = genStatus.error_message || 'Generation failed on provider side';
 					await pb.collection('videos').update(id, {
 						status: 'failed',
@@ -461,7 +462,7 @@ router.get('/:id/status', async (req, res) => {
 				}
 				// If still PROCESSING, just return current status
 			} catch (checkError) {
-				logger.warn(`Active GeminiGen check failed for ${id}: ${checkError.message}`);
+				logger.warn(`Active SnapGen check failed for ${id}: ${checkError.message}`);
 				// Return current DB status if check fails
 			}
 		}

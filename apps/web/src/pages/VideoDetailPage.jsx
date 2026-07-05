@@ -15,10 +15,12 @@ import {
 	Trash2,
 	Wand2,
 	XCircle,
+	Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import VideoPlayer from '@/components/VideoPlayer.jsx';
 import RegenerateModal from '@/components/RegenerateModal.jsx';
+import ExtendModal from '@/components/ExtendModal.jsx';
 import apiServerClient from '@/lib/apiServerClient.js';
 import {
 	AlertDialog,
@@ -56,8 +58,6 @@ const VideoDetailPage = () => {
 	const [busy, setBusy] = useState({}); // { delete, share, favorite }
 	const [regenOpen, setRegenOpen] = useState(false);
 	const [extendOpen, setExtendOpen] = useState(false);
-	const [extendPrompt, setExtendPrompt] = useState('');
-	const [extendLoading, setExtendLoading] = useState(false);
 	const [deleteConfirm, setDeleteConfirm] = useState(false);
 
 	useEffect(() => {
@@ -117,46 +117,6 @@ const VideoDetailPage = () => {
 			setBusyKey('delete', false);
 		} finally {
 			setDeleteConfirm(false);
-		}
-	};
-
-	const handleExtend = async () => {
-		if (!extendPrompt.trim() || extendPrompt.trim().length < 3) {
-			toast.error('Describe what should happen next (a few words).');
-			return;
-		}
-		setExtendLoading(true);
-		try {
-			const idempotencyKey =
-				typeof crypto !== 'undefined' && crypto.randomUUID
-					? crypto.randomUUID()
-					: `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-			const res = await apiServerClient.fetch(`/videos/${id}/extend`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					prompt: extendPrompt.trim(),
-					idempotency_key: idempotencyKey,
-				}),
-			});
-
-			if (!res.ok) {
-				const errData = await res.json().catch(() => ({}));
-				throw new Error(errData.error || `Extend failed (HTTP ${res.status})`);
-			}
-
-			const data = await res.json();
-			const newId = data.video?.id;
-			toast.success('Extension started — merging clips in the background');
-			setExtendOpen(false);
-			setExtendPrompt('');
-			// Navigate to the new merged video once it exists
-			if (newId) navigate(`/app/library/${newId}`);
-		} catch (err) {
-			toast.error(typeof err?.message === 'string' ? err.message : 'Extend failed');
-		} finally {
-			setExtendLoading(false);
 		}
 	};
 
@@ -321,6 +281,16 @@ const VideoDetailPage = () => {
 								</button>
 
 								<button
+									onClick={() => setExtendOpen(true)}
+									disabled={!completed || video.output_type === 'image'}
+									className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-white/15 bg-white/[0.03] text-sm font-medium hover:bg-white/[0.07] disabled:opacity-30 transition-colors"
+									title={video.output_type === 'image' ? 'Images cannot be extended' : 'Continue the video with a new scene'}
+								>
+									<Plus className="w-3.5 h-3.5" />
+									Extend
+								</button>
+
+								<button
 									onClick={toggleFavorite}
 									disabled={busy.favorite}
 									className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-sm font-medium transition-colors ${
@@ -342,56 +312,6 @@ const VideoDetailPage = () => {
 									Delete
 								</button>
 							</div>
-
-							{/* Extend composer */}
-							<AnimatePresence>
-								{extendOpen && (
-									<motion.div
-										initial={{ opacity: 0, height: 0 }}
-										animate={{ opacity: 1, height: 'auto' }}
-										exit={{ opacity: 0, height: 0 }}
-										className="overflow-hidden"
-									>
-										<div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 flex flex-col gap-3">
-											<div>
-												<p className="text-sm font-medium mb-1 flex items-center gap-1.5">
-													<Wand2 className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
-													Extend this video
-												</p>
-												<p className="text-xs text-white/40">
-													Describe what happens next. A new clip will be generated and merged into a single continuous video.
-													{video.total_duration ? ` Current length: ${video.total_duration}s.` : ''}
-												</p>
-											</div>
-											<div className="flex items-center gap-2">
-												<input
-													type="text"
-													value={extendPrompt}
-													onChange={(e) => setExtendPrompt(e.target.value)}
-													onKeyDown={(e) => {
-														if (e.key === 'Enter' && !e.shiftKey) {
-															e.preventDefault();
-															handleExtend();
-														}
-													}}
-													placeholder="e.g. the camera pulls back to reveal a mountain range"
-													className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30 transition-colors"
-												/>
-												<button
-													onClick={handleExtend}
-													disabled={extendLoading || extendPrompt.trim().length < 3}
-													className="px-4 py-2 rounded-lg bg-white text-black text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 transition-opacity flex items-center gap-1.5"
-												>
-													{extendLoading
-														? <Loader2 className="w-4 h-4 animate-spin" />
-														: <Wand2 className="w-4 h-4" />}
-													Extend
-												</button>
-											</div>
-										</div>
-									</motion.div>
-								)}
-							</AnimatePresence>
 
 							{/* Related */}
 							{relatedVideos.length > 0 && (
@@ -522,6 +442,14 @@ const VideoDetailPage = () => {
 				defaultSettings={video}
 				originalPrompt={video?.prompt}
 			/>
+
+			<ExtendModal
+				videoId={id}
+				isOpen={extendOpen}
+				onClose={() => setExtendOpen(false)}
+				sourcePrompt={video?.prompt}
+			/>
+
 			<AlertDialog open={deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(false)}>
 				<AlertDialogContent className="bg-[hsl(var(--surface))] border-[hsl(var(--border))]">
 					<AlertDialogHeader>

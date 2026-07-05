@@ -1,6 +1,6 @@
 import pb from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
-import { generateVideo, generateImage, extendVideo, getGenerationStatus, GeminiGenStatus } from '../api/geminigen.js';
+import { generateVideo, generateImage, getGenerationStatus, SnapgenStatus } from '../api/snapgen.js';
 import { refundCredits } from '../utils/dbTransaction.js';
 import { getVariantByKey, chainedClipCount, chainedClipDuration } from '../constants/models.js';
 import { createTempDir, cleanupTempDir, downloadAndMerge } from '../utils/videoMerger.js';
@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 /**
  * Video Generation Processor
  * 
- * Handles video/image generation by submitting to GeminiGen API
+ * Handles video/image generation by submitting to SnapGen API
  * and polling for completion.
  * 
  * Designed for shared hosting environments without Redis.
@@ -119,14 +119,14 @@ export async function processGeneration(videoRecord, isImage) {
 			external_id: result.uuid,
 		});
 
-		logger.info(`GeminiGen submitted: video=${videoRecord.id}, external_id=${result.uuid}`);
+		logger.info(`SnapGen submitted: video=${videoRecord.id}, external_id=${result.uuid}`);
 
-		// Poll GeminiGen for completion
+		// Poll SnapGen for completion
 		await pollForCompletionFallback(videoRecord, result.uuid, isImage);
 	} catch (error) {
-		logger.error(`GeminiGen submission error for ${videoRecord.id}:`, error.message);
+		logger.error(`SnapGen submission error for ${videoRecord.id}:`, error.message);
 
-		// Translate known GeminiGen API error codes into user-friendly messages.
+		// Translate known SnapGen API error codes into user-friendly messages.
 		const rawMessage = error.message || '';
 		let userMessage = `Submission failed: ${rawMessage}`;
 
@@ -163,7 +163,7 @@ export async function processGeneration(videoRecord, isImage) {
 }
 
 /**
- * Poll GeminiGen for completion (fallback mode)
+ * Poll SnapGen for completion (fallback mode)
  */
 async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
 	for (let attempt = 1; attempt <= POLLING_CONFIG.maxAttempts; attempt++) {
@@ -173,7 +173,7 @@ async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
 			const status = await getGenerationStatus(externalUuid);
 			logger.info(`Poll #${attempt} for ${videoRecord.id}: status=${status.status} (${status.status_desc || ''})`);
 
-			if (status.status === GeminiGenStatus.COMPLETED) {
+			if (status.status === SnapgenStatus.COMPLETED) {
 				const mediaUrl = isImage
 					? (status.image_url || status.video_url)
 					: (status.video_url || status.image_url);
@@ -190,7 +190,7 @@ async function pollForCompletionFallback(videoRecord, externalUuid, isImage) {
 				return;
 			}
 
-			if (status.status === GeminiGenStatus.FAILED) {
+			if (status.status === SnapgenStatus.FAILED) {
 				const errMsg = status.error_message || 'Generation failed on provider side';
 				await pb.collection('videos').update(videoRecord.id, {
 					status: 'failed',
@@ -376,10 +376,10 @@ async function processChainedGeneration(videoRecord, clipCount, refUrls) {
 }
 
 /**
- * Poll GeminiGen for a single clip to complete and return its video URL.
+ * Poll SnapGen for a single clip to complete and return its video URL.
  * Shared by all clips in the chain.
  *
- * @param {string} uuid      - GeminiGen generation UUID to poll.
+ * @param {string} uuid      - SnapGen generation UUID to poll.
  * @param {string} videoId   - Our DB record ID (logging only).
  * @param {number} clipIndex - Which clip in the chain (logging only).
  * @returns {Promise<string>} Public URL of the completed clip.
@@ -392,13 +392,13 @@ async function pollUntilCompleteChain(uuid, videoId, clipIndex) {
 			const status = await getGenerationStatus(uuid);
 			logger.info(`Chained poll clip=${clipIndex} attempt=${attempt} for ${videoId}: status=${status.status}`);
 
-			if (status.status === GeminiGenStatus.COMPLETED) {
+			if (status.status === SnapgenStatus.COMPLETED) {
 				const url = status.video_url || status.media_url;
 				if (!url) throw new Error(`Clip ${clipIndex} completed but returned no URL`);
 				return url;
 			}
 
-			if (status.status === GeminiGenStatus.FAILED) {
+			if (status.status === SnapgenStatus.FAILED) {
 				throw new Error(status.error_message || `Clip ${clipIndex} failed on provider side`);
 			}
 		} catch (err) {

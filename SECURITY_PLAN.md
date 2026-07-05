@@ -13,7 +13,7 @@ A living document. Tracks what's shipped, what's pending, and what's queued for 
 
 ## Threat model
 
-The product gives every authenticated user 10 free credits worth of video/image generations. Each generation calls a paid third-party API (GeminiGen). So **every successful abuse = real money out**. Two main attack patterns:
+The product gives every authenticated user 10 free credits worth of video/image generations. Each generation calls a paid third-party API (SnapGen). So **every successful abuse = real money out**. Two main attack patterns:
 
 1. **Account farming** — bot creates N email accounts to get N × 10 free credits.
 2. **Single-account amplification** — one user finds a bug or race condition that lets them generate without consuming credits.
@@ -100,7 +100,7 @@ Recommendation: B for new features, A as a quick patch.
 
 ### 2.2 Daily generation cap per user ✅
 
-**Why:** A single compromised paying account can drain GeminiGen budget overnight. Equally, free users are only balance-capped on *successful* generations — failed generations are auto-refunded, leaving a "submit → fail → refund → resubmit" loop that hammers the paid provider without draining credits.
+**Why:** A single compromised paying account can drain SnapGen budget overnight. Equally, free users are only balance-capped on *successful* generations — failed generations are auto-refunded, leaving a "submit → fail → refund → resubmit" loop that hammers the paid provider without draining credits.
 
 **Implemented:** Middleware-style check `checkDailyGenerationCap` (`apps/api/src/utils/generationLimit.js`) runs inside both `POST /videos` and `POST /videos/:id/regenerate`, after the idempotency replay check (so genuine retries are exempt). Counts `videos` rows created by the user in the last 24h and rejects with HTTP 429 (`code: DAILY_LIMIT_REACHED`) once the cap is hit. Regenerate reserves `variationCount` slots up front.
 
@@ -125,7 +125,7 @@ Note: Hostinger Node.js currently runs as a single process per app, so this is a
 
 **Where:** `apps/api/src/routes/stripe.js`. Confirm `stripe.webhooks.constructEvent` is called and rejects bad signatures BEFORE any credit grant. Add an integration test.
 
-Also: GeminiGen webhook signature (`GEMINIGEN_WEBHOOK_PUBLIC_KEY_PATH`) is currently optional (`apps/api/src/routes/webhooks.js`). Make it required in production env.
+Also: SnapGen webhook signature (`SNAPGEN_WEBHOOK_PUBLIC_KEY_PATH`) is currently optional (`apps/api/src/routes/webhooks.js`). Make it required in production env.
 
 ### 2.5 Tighten PocketBase access rules
 
@@ -186,7 +186,7 @@ Add hidden form fields. If filled, reject (most bots fill all fields). Cheap, co
 
 These were committed before we cleaned things up. Treat as compromised.
 
-- GeminiGen API key: `geminiai-621d1d1e12986601bf0af0ce4a1201d4` — rotate at GeminiGen dashboard
+- SnapGen API key: `geminiai-621d1d1e12986601bf0af0ce4a1201d4` — rotate at SnapGen dashboard
 - Old PocketBase admin password (`Admin123456!`) — already replaced with a new password, but the old one is in history
 
 ### How to verify Tier 1 defenses are actually working
@@ -233,7 +233,7 @@ Without a SIEM, the cheapest signals to watch are:
 
 - **Spike in `/auth/signup` 4xx responses** — bot probing
 - **Spike in PocketBase `users` collection size with low `verified=true` ratio** — disposable signups slipping through
-- **Sudden GeminiGen bill increase** — credit burn vector
+- **Sudden SnapGen bill increase** — credit burn vector
 - **Rate of `transactions.type='generation'` per user** — anomaly detection
 
 For now, eyeball the Hostinger Node.js logs and Railway PocketBase admin's `users` and `transactions` views weekly.

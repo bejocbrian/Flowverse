@@ -5,7 +5,7 @@
 //   - ref_image_urls  (text) JSON-encoded array of public reference-image URLs
 //                            we uploaded to the _integratedAiImages store
 //
-// These let the generation worker pass reference images to GeminiGen. Hidden
+// These let the generation worker pass reference images to SnapGen. Hidden
 // from end users (vendor-ish detail), same as external_id/webhook_data.
 //
 // Idempotent: safe to run more than once.

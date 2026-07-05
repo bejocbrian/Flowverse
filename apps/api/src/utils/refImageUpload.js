@@ -9,7 +9,7 @@ import logger from './logger.js';
  * - including multipart - before multer could read it. So the generate route
  * accepts reference images as base64 data URLs in the JSON body. We decode
  * them here, store them in the existing public `_integratedAiImages` file
- * collection, and hand GeminiGen the resulting public URLs.
+ * collection, and hand SnapGen the resulting public URLs.
  */
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
