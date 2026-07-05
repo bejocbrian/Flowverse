@@ -41,9 +41,9 @@ jobs:
       - name: Deploy API src via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
-          server: ${{ secrets.API_FTP_HOST }}
-          username: ${{ secrets.API_FTP_USERNAME }}
-          password: ${{ secrets.API_FTP_PASSWORD }}
+          server: ${{ secrets.FTP_API_HOST }}
+          username: ${{ secrets.FTP_API_USERNAME }}
+          password: ${{ secrets.FTP_API_PASSWORD }}
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: apps/api/
           server-dir: ${{ vars.FTP_API_REMOTE_DIR || './' }}
